@@ -83,7 +83,7 @@ PHABRICATOR_URLS = {
 }
 
 # arc related consts.
-ARC = ["arc"]
+ARC = [os.getenv("ARC_COMMAND", "arc")]
 ARC_COMMIT_DESC_TEMPLATE = """
 {title}
 
