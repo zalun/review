@@ -590,9 +590,12 @@ class Mercurial(Repository):
 
         # Enable evolve if the user's currently using it.  evolve makes amending
         # commits with children trivial (amongst other things).
-        if "extensions.evolve" in hg_config:
+        if self._get_extension("evolve", hg_config) is not None:
             self._hg.extend(
-                ["--config", "extensions.evolve=%s" % hg_config["extensions.evolve"]]
+                [
+                    "--config",
+                    "extensions.evolve=%s" % self._get_extension("evolve", hg_config),
+                ]
             )
             self.use_evolve = True
 
@@ -606,18 +609,34 @@ class Mercurial(Repository):
             self.unlink_obsstore = not os.path.exists(self.obsstore)
 
         # This script interacts poorly with mq.
-        self.has_mq = "extensions.mq" in hg_config
+        self.has_mq = self._get_extension("mq", hg_config) is not None
         if self.has_mq:
             self._hg.extend(
-                ["--config", "extensions.mq=%s" % hg_config["extensions.mq"]]
+                ["--config", "extensions.mq=%s" % self._get_extension("mq", hg_config)]
             )
 
         # `shelve` is useful for dealing with uncommitted changes; track if it's
         # currently enabled so we can tailor our error accordingly.
-        self.has_shelve = "extensions.shelve" in hg_config
+        self.has_shelve = self._get_extension("shelve", hg_config) is not None
 
         # Disable the user's hgrc file, to ensure we run without rogue extensions.
         os.environ["HGRCPATH"] = ""
+
+    @staticmethod
+    def _get_extension(extension, config):
+        if not (
+            "extensions.%s" % extension in config
+            or "extensions.hgext.%s" % extension in config
+        ):
+            return None
+
+        ext = config.get(
+            "extensions.%s" % extension, config.get("extensions.hgext.%s" % extension)
+        )
+        if ext is None:
+            return ""
+
+        return ext
 
     def hg(self, command, **kwargs):
         return check_call(self._hg + command, cwd=self.path, **kwargs)
