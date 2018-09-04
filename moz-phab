@@ -524,6 +524,12 @@ class Repository(object):
         if errors:
             raise Error("\n\n".join(errors))
 
+    def get_current_node(self):
+        """Return the sha/hash of the current revision."""
+
+    def get_refreshed_node(self, node):
+        """Return the sha/hash of the node after rebase."""
+
 
 #
 # Mercurial
@@ -531,6 +537,8 @@ class Repository(object):
 
 
 class Mercurial(Repository):
+    _changing_node_table = {}
+
     def __init__(self, path):
         dot_path = os.path.join(path, ".hg")
         if not os.path.exists(dot_path):
@@ -671,8 +679,22 @@ class Mercurial(Repository):
         """Update commit's node and name from node and rev."""
         if not rev:
             rev = self.hg_log(node, select="rev", split=False)
+
+        if node != commit["node"]:
+            self._changing_node_table[commit["node"]] = node
+
         commit["node"] = node
         commit["name"] = "%s:%s" % (rev, node[:12])
+
+    def get_current_node(self):
+        return self.hg_log(".")[0]
+
+    def get_refreshed_node(self, node):
+        refreshed = self._changing_node_table.get(node)
+        if not refreshed:
+            return node
+
+        return self.get_refreshed_node(refreshed)
 
     def refresh_commit_stack(self, commits):
         """Update all commits to point to their superseded commit."""
@@ -1137,6 +1159,8 @@ def submit(repo, args):
     if DEBUG or (hasattr(args, "trace") and args.trace):
         config.arc.append("--trace")
 
+    current_node = repo.get_current_node()
+
     # Find and preview commits to submits.
     commits = repo.commit_stack()
     if not commits:
@@ -1251,6 +1275,8 @@ def submit(repo, args):
             repo.amend_commit(commit, commits)
 
         previous_commit = commit
+
+    repo.checkout(repo.get_refreshed_node(current_node))
 
     # Cleanup (eg. strip nodes) and refresh to ensure the stack is right for the
     # final showing.
