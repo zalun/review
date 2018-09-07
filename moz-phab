@@ -931,11 +931,136 @@ class Git(Repository):
 
         super(Git, self).__init__(path, dot_path)
 
-        if not which("git"):
+        self._git = ["git"]
+        self.revset = None
+
+        if not which(self._git[0]):
             raise Error("Failed to find 'git' executable")
         # TODO draw the rest of the owl
 
-        raise NotImplementedError("git support is not yet implemented")
+        logger.debug("found git repo in %s" % path)
+
+        # TODO choose git exe for Windows
+        # TODO confirm it is installed
+        # TODO read the config
+        # git config -l
+        # TODO find out if there is any problem with the configuration
+        # TODO use the username configured for git
+        # TODO prepare CLI configuration
+        # TODO disable the usage of the user's config file
+
+        # TODO store current branch
+        self.current_head = self._get_current_head()
+
+    def git(self, command, **kwargs):
+        """Call git from the repository path."""
+        return check_call(self._git + command, cwd=self.path, **kwargs)
+
+    def git_out(self, command, **kwargs):
+        return check_output(self._git + command, cwd=self.path, **kwargs)
+
+    def cleanup(self):
+        # TODO check if any cleanup is actually needed
+        pass
+
+    def refresh_commit_stack(self, commits):
+        """Update all commits to point to their superseded commit."""
+        # TODO find out if there is a need to refresh any names
+        self.revset = "%s..%s" % (commits[0]["node"], commits[-1]["node"])
+
+        super(Git, self).refresh_commit_stack(commits)
+
+    def set_args(self, args):
+        super(Git, self).set_args(args)
+        # TODO find out what to do for (auto)
+
+        if self.args.start_rev == "(auto)":
+            # TODO find the ancestor of the commit
+            start = "HEAD~"
+        else:
+            start = self.args.start_rev
+
+        end = self.args.end_rev
+
+        self.revset = "%s..%s" % (start[:12], end[:12])
+
+    def commit_stack(self):
+        """Collect all the info about commits."""
+        boundary = "--%s--\n" % uuid.uuid4().get_hex()
+        log = self.git_out(
+            [
+                "log",
+                # "-z",
+                "--reverse",
+                "--format=%%H %%s%%n%%b%s" % boundary,
+                self.revset,
+            ],
+            split=False,
+            strip=False,
+        )[: -len(boundary)]
+
+        commits = []
+
+        for log_line in log.split(boundary):
+            node, desc = log_line.split(" ", 1)
+            desc = desc.splitlines()
+
+            commits.append(
+                {
+                    "name": node[:12],
+                    "node": node,
+                    "title": desc[0],
+                    "title-preview": desc[0],
+                    "body": "\n".join(desc[1:]).rstrip(),
+                    "bug-id": None,
+                    "reviewers": [],
+                    "rev-id": None,
+                }
+            )
+
+        return commits
+
+    def checkout(self, node):
+        # XXX This will leave the repository in a detached state
+        self.git(["checkout", "--quiet", node])
+
+    def _get_current_head(self):
+        return self.git_out(["symbolic-ref", "HEAD"], split=False)
+
+    def _get_current_hash(self):
+        return self.git_out(["rev-parse", "HEAD"], split=False)
+
+    def _amend_commit_body(self, node, body):
+        with NamedTemporaryFile() as temp_f:
+            temp_f.write(body)
+            temp_f.flush()
+
+            self.checkout(node)
+            self.git(["commit", "--amend", "-F", temp_f.name, "--quiet"])
+
+    def amend_commit(self, commit, commits):
+        updated_body = "%s\n%s" % (commit["title"], commit["body"])
+
+        current_body = self.git_out(
+            ["show", "-s", "--format=%s%n%b", commit["node"]], split=False
+        )
+        if current_body == updated_body:
+            logger.debug("not amending commit %s, unchanged" % commit["name"])
+            return False
+
+        # Amend the commit (moves the HEAD)
+        self._amend_commit_body(commit["node"], updated_body)
+        # Rebase
+        rebased_node = self._get_current_hash()
+        self.checkout(self.current_head)
+        self.git(["rebase", rebased_node, "--quiet"])
+
+    def rebase_commit(self, source_commit, dest_commit):
+        self.git(
+            ["rebase"]
+            + ["--onto", source_commit["node"]]
+            + ["--root", dest_commit["node"]]
+        )
 
 
 #
