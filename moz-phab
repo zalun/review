@@ -34,6 +34,7 @@ import traceback
 import urllib2
 import uuid
 from distutils.version import LooseVersion
+from subprocess import Popen, PIPE
 
 # Known Issues
 # - reordering, folding, etc commits doesn't result in the stack being updated
@@ -523,6 +524,20 @@ class Repository(object):
 
         if errors:
             raise Error("\n\n".join(errors))
+
+    def check_arc(self):
+        """Check if arc can communicate with Phabricator."""
+        # Check the cache
+        path = os.path.join(self.dot_path, ".moz-phab_arc-configured")
+        if os.path.isfile(path):
+            return True
+
+        if arc_ping(cwd=self.path):
+            with open(path, "a") as f:
+                os.utime(path, None)
+            return True
+
+        return False
 
 
 #
@@ -1082,12 +1097,38 @@ def show_commit_stack(repo, commits, show_rev_urls=False, show_warnings=False):
             logger.warning("-> %sD%s" % (repo.phab_url, commit["rev-id"]))
 
 
-def arc_out(args, cwd):
+def arc_out(args, cwd, **kwargs):
     """arc wrapper that logs output"""
-    arc_output = check_output(config.arc + args, cwd=cwd, split=False)
+    arc_output = check_output(config.arc + args, cwd=cwd, split=False, **kwargs)
     if logger.level != logging.DEBUG:
         logger.info(arc_output)
     return arc_output
+
+
+def arc_ping(cwd):
+    """Sends a ping to the server to check if arc is configured."""
+    logger.debug('$ echo "{}" | %s call-conduit conduit.ping' % " ".join(config.arc))
+    p = Popen(
+        config.arc + ["call-conduit", "conduit.ping"],
+        stdin=PIPE,
+        stdout=PIPE,
+        stderr=PIPE,
+    )
+    stdout, stderr = p.communicate("{}")
+    if stderr:
+        if DEBUG:
+            logger.debug(stderr)
+
+        if "install-certificate" in stderr:
+            logger.error(
+                "You need to install a certificate to authenticate in Phabricator.\n"
+                "To do this run **arc install-certificate**."
+            )
+        else:
+            logger.error("Unable to communicate to Phabricator.")
+        return False
+
+    return True
 
 
 def arc_message(template_vars):
@@ -1169,6 +1210,10 @@ def submit(repo, args):
             if len(untracked) <= 5:
                 for filename in untracked:
                     logger.info("  %s" % filename)
+
+    # Check if arc is configured
+    if not repo.check_arc():
+        raise Error("Failed to run arc.")
 
     # Confirmation prompt.
     if args.yes:
