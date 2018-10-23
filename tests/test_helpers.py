@@ -34,26 +34,20 @@ class Helpers(unittest.TestCase):
 
         m_json.load.side_effect = (
             dict(a="value A", b=3),
-            dict(b="value B", c=dict(a="value CA"))
+            dict(b="value B", c=dict(a="value CA")),
         )
-        self.assertEqual(
-            3, review.read_json_field(["file_a", "file_b"], ["b"])
-        )
+        self.assertEqual(3, review.read_json_field(["file_a", "file_b"], ["b"]))
         m_json.load.side_effect = (
             dict(b="value B", c=dict(a="value CA")),
             dict(a="value A", b=3),
         )
-        self.assertEqual(
-            "value B",
-            review.read_json_field(["file_b", "file_a"], ["b"]),
-        )
+        self.assertEqual("value B", review.read_json_field(["file_b", "file_a"], ["b"]))
         m_json.load.side_effect = (
             dict(a="value A", b=3),
             dict(b="value B", c=dict(a="value CA")),
         )
         self.assertEqual(
-            "value CA",
-            review.read_json_field(["file_a", "file_b"], ["c", "a"]),
+            "value CA", review.read_json_field(["file_a", "file_b"], ["c", "a"])
         )
 
     @mock.patch("__builtin__.termios", create=True)
