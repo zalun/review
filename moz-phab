@@ -614,10 +614,12 @@ class Repository(object):
         all_reviewers = {}
         reviewer_commit_map = {}
         commit_invalid_reviewers = {}
+        commit_unavailable_reviewers = {}
 
         # Flatten and deduplicate reviewer list, keeping track of the associated commit
         for commit in commits:
             commit_invalid_reviewers[commit["node"]] = []
+            commit_unavailable_reviewers[commit["node"]] = []
 
             for group in commit["reviewers"].keys():
                 for reviewer in commit["reviewers"][group]:
@@ -628,10 +630,26 @@ class Repository(object):
                     reviewer_commit_map.setdefault(reviewer, [])
                     reviewer_commit_map[reviewer].append(commit["node"])
 
-        # Verify all reviewers in a single call
-        for invalid_reviewer in check_for_invalid_reviewers(all_reviewers, self.path):
+        # Get reviewers user information
+        combined_reviewers = []
+        for sublist in all_reviewers.values():
+            combined_reviewers.extend([r.rstrip("!") for r in sublist])
+        users = get_users(combined_reviewers, self.path)
+
+        # Check for invalid reviewers
+        for invalid_reviewer in check_for_invalid_reviewers(
+            combined_reviewers, users, self.path
+        ):
             for node in reviewer_commit_map[normalise_reviewer(invalid_reviewer)]:
                 commit_invalid_reviewers[node].append(invalid_reviewer)
+
+        # Check for availability
+        if check_if_current_events(users, self.path):
+            for unavailable_reviewer in check_each_reviewer_events(users, self.path):
+                for node in reviewer_commit_map[
+                    normalise_reviewer(unavailable_reviewer["username"])
+                ]:
+                    commit_unavailable_reviewers[node].append(unavailable_reviewer)
 
         for commit in commits:
             commit_errors = []
@@ -645,6 +663,12 @@ class Repository(object):
 
             for reviewer in commit_invalid_reviewers[commit["node"]]:
                 commit_errors.append("%s is not a valid reviewer's name" % reviewer)
+
+            for reviewer in commit_unavailable_reviewers[commit["node"]]:
+                commit_errors.append(
+                    "%s is not available until %s" % (reviewer["username"],
+                    reviewer["available"])
+                )
 
             if commit_errors:
                 errors.append(
@@ -1645,7 +1669,18 @@ def show_commit_stack(repo, commits, show_rev_urls=False, show_warnings=False):
             logger.warning("-> %s/D%s" % (repo.phab_url.rstrip("/"), commit["rev-id"]))
 
 
-def check_for_invalid_reviewers(reviewers, cwd):
+def get_users(users, cwd):
+    """returns a list of dicts representing reviewers."""
+    # See https://phabricator.services.mozilla.com/api/user.search
+    api_call_args = {"queryKey": "active", "constraints": {"usernames": users}}
+    result = arc_call_conduit("user.search", api_call_args, cwd)
+    return [
+        dict(username=data["fields"]["username"], phid=data["phid"])
+        for data in result["data"]
+    ]
+
+
+def check_for_invalid_reviewers(reviewers, users, cwd):
     """Return a list of invalid reviewer names.
 
     Args:
@@ -1654,25 +1689,12 @@ def check_for_invalid_reviewers(reviewers, cwd):
     """
 
     # Combine the lists of requested reviewers and granted reviewers.
-    all_reviewers = []
-    found_names = []
-    for sublist in reviewers.values():
-        all_reviewers.extend([r.rstrip("!") for r in sublist if not r.startswith("#")])
-
-    if all_reviewers:
-        # See https://phabricator.services.mozilla.com/api/user.search
-        api_call_args = {
-            "queryKey": "active",
-            "constraints": {"usernames": all_reviewers},
-        }
-        result = arc_call_conduit("user.search", api_call_args, cwd)
-        found_names = [data["fields"]["username"] for data in result["data"]]
+    all_reviewers = [r.rstrip("!") for r in reviewers if not r.startswith("#")]
+    found_names = [u["username"] for u in users]
 
     # Group reviewers are represented by a "#" prefix
-    all_groups = []
     found_groups = []
-    for sublist in reviewers.values():
-        all_groups.extend([r.rstrip("!") for r in sublist if r.startswith("#")])
+    all_groups = [r.rstrip("!") for r in reviewers if r.startswith("#")]
 
     if all_groups:
         # See https://phabricator.services.mozilla.com/api/user.search
@@ -1684,6 +1706,48 @@ def check_for_invalid_reviewers(reviewers, cwd):
     found_names.extend(found_groups)
     return list(set(all_reviewers) - set(found_names))
 
+
+def get_hosts_current_events(phids, cwd):
+    """Get events hosted by users.
+
+    Args:
+        phids: a list of hosts PHIDs
+        cwd: The directory to run the arc command in.
+
+    Returns: a list of current events organised by hosts
+    """
+    api_call_args = {"constraints": {"hostPHIDs": phids}}
+    result = arc_call_conduit("calendar.event.search", api_call_args, cwd)
+    current_events = []
+    epoch = time.time()
+    for event in result["data"]:
+        if (
+            epoch > event["fields"]["startDateTime"]["epoch"]
+            and epoch < event["fields"]["endDateTime"]["epoch"]
+        ):
+            current_events.append(event["fields"])
+    return current_events
+
+
+def check_if_current_events(users, cwd):
+    """Check if any of the reviewers has scheduled an event.
+
+    Args:
+        reviewers: A commit reviewers dict of granted and requested reviewers.
+        cwd: The directory to run the arc command in.
+    """
+    events = get_hosts_current_events([f["phid"] for f in users], cwd)
+    return len(events) > 0
+
+
+def check_each_reviewer_events(users, cwd):
+    """Check who scheduled a current event."""
+    events = []
+    for user in users:
+        current_events = get_hosts_current_events([user["phid"]], cwd)
+        events.append(dict(username=user["username"], available=current_events[0]["endDateTime"]["display"]["default"]))
+
+    return events
 
 #
 # Arc helpers

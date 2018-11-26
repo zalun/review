@@ -1,3 +1,4 @@
+import copy
 import errno
 import exceptions
 import imp
@@ -5,9 +6,11 @@ import json
 import mock
 import os
 import sys
+import time
 import unittest
 
 import pytest
+from freezegun import freeze_time
 
 mozphab = imp.load_source(
     "mozphab", os.path.join(os.path.dirname(__file__), os.path.pardir, "moz-phab")
@@ -235,15 +238,9 @@ class Helpers(unittest.TestCase):
 
 @mock.patch("mozphab.arc_out")
 def test_valid_reviewers_in_phabricator_returns_no_errors(arc_out):
-    # See https://phabricator.services.mozilla.com/api/user.search
+    users = [{"username": "alice"}]
     arc_out.side_effect = (
-        json.dumps(
-            {
-                "error": None,
-                "errorMessage": None,
-                "response": {"data": [{"fields": {"username": "alice"}}]},
-            }
-        ),
+        # See https://phabricator.services.mozilla.com/api/project.search
         json.dumps(
             {
                 "error": None,
@@ -252,32 +249,15 @@ def test_valid_reviewers_in_phabricator_returns_no_errors(arc_out):
             }
         ),
     )
-    reviewers = dict(granted=[], request=["alice", "#user-group"])
-    assert [] == mozphab.check_for_invalid_reviewers(reviewers, "")
+    reviewers = ["alice", "#user-group"]
+    assert [] == mozphab.check_for_invalid_reviewers(reviewers, users, "")
 
 
 @mock.patch("mozphab.arc_out")
 def test_non_existent_reviewers_or_groups_generates_error_list(arc_out):
-    reviewers = dict(
-        granted=[],
-        request=[
-            "alice",
-            "goober",
-            "goozer",
-            "#user-group",
-            "#goo-group",
-            "#gon-group",
-        ],
-    )
+    reviewers = ["alice", "goober", "goozer", "#user-group", "#goo-group", "#gon-group"]
+    users = [{"username": "alice"}]
     arc_out.side_effect = (
-        # See https://phabricator.services.mozilla.com/api/user.search
-        json.dumps(
-            {
-                "error": None,
-                "errorMessage": None,
-                "response": {"data": [{"fields": {"username": "alice"}}]},
-            }
-        ),
         # See https://phabricator.services.mozilla.com/api/project.search
         json.dumps(
             {
@@ -288,7 +268,7 @@ def test_non_existent_reviewers_or_groups_generates_error_list(arc_out):
         ),
     )
     expected_errors = ["#goo-group", "goozer", "#gon-group", "goober"]
-    assert expected_errors == mozphab.check_for_invalid_reviewers(reviewers, "")
+    assert expected_errors == mozphab.check_for_invalid_reviewers(reviewers, users, "")
 
 
 @mock.patch("mozphab.arc_out")
@@ -332,3 +312,59 @@ def test_api_call_with_error_raises_exception(arc_out):
 def test_arc_ping_with_invalid_certificate_returns_false(arc_out):
     arc_out.side_effect = mozphab.CommandError
     assert not mozphab.arc_ping("")
+
+
+@freeze_time("2018-11-26 12:00:01")
+@mock.patch("mozphab.arc_call_conduit")
+def test_get_current_events(m_arc):
+    events = {
+        "data": [
+            {
+                "fields": {
+                    "name": "VACATION",
+                    "endDateTime": {
+                        "timezone": "UTC",
+                        "epoch": 1543622400,
+                        "display": {"default": "Sat, Dec 1, 12:00 AM"},
+                        "iso8601": "20181201",
+                    },
+                    "dateCreated": 1542971567,
+                    "isAllDay": True,
+                    "startDateTime": {
+                        "timezone": "UTC",
+                        "epoch": 1542931200,
+                        "display": {"default": "Fri, Nov 23, 12:00 AM"},
+                        "iso8601": "20181123",
+                    },
+                }
+            }
+        ]
+    }
+    ts = time.time()
+    m_arc.return_value = events
+    get_events = mozphab.get_hosts_current_events
+
+    events["data"][0]["fields"]["startDateTime"]["epoch"] = ts - 10000
+    events["data"][0]["fields"]["endDateTime"]["epoch"] = ts + 10000
+    assert get_events([], 'a') == [events["data"][0]["fields"]]
+
+    events["data"][0]["fields"]["startDateTime"]["epoch"] = ts + 10000
+    events["data"][0]["fields"]["endDateTime"]["epoch"] = ts + 20000
+    assert get_events([], 'a') == []
+
+
+    events["data"][0]["fields"]["startDateTime"]["epoch"] = ts - 20000
+    events["data"][0]["fields"]["endDateTime"]["epoch"] = ts - 10000
+    assert get_events([], 'a') == []
+
+
+@mock.patch("mozphab.get_hosts_current_events")
+def test_check_if_events(m_events):
+    users = [{"phid": 1}]
+    scheduled = mozphab.check_if_current_events
+
+    m_events.return_value = range(3)
+    assert scheduled(users, 'a')
+
+    m_events.return_value = []
+    assert not scheduled(users, 'a')

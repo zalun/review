@@ -50,9 +50,13 @@ class Commits(unittest.TestCase):
             self.fail("%s raised" % repr(info[0]))
         self.fail("%s failed to raise Error" % callableObj)
 
+    @mock.patch("mozphab.check_if_current_events")
     @mock.patch("mozphab.check_for_invalid_reviewers")
-    def test_commit_validation(self, check_reviewers):
+    @mock.patch("mozphab.get_users")
+    def test_commit_validation(self, m_users, check_reviewers, check_events):
         check_reviewers.return_value = []
+        m_users.return_value = [{"username": "alice", "phid": "PHID-1"}]
+        check_events.return_value = False
         repo = mozphab.Repository(None, None, "dummy")
         check = repo.check_commits_for_submit
 
@@ -77,15 +81,23 @@ class Commits(unittest.TestCase):
 
         self._assertError(check, [commit("1", (["r"], [])), commit("", (["r"], []))])
 
+    @mock.patch("mozphab.check_if_current_events")
     @mock.patch("mozphab.check_for_invalid_reviewers")
-    def test_invalid_reviewers_fails_the_stack_validation_check(self, check_reviewers):
-        def fail_gonzo(reviewers, _):
+    @mock.patch("mozphab.get_users")
+    def test_invalid_reviewers_fails_the_stack_validation_check(
+        self, m_users, check_reviewers, check_events
+    ):
+        m_users.return_value = [{"username": "alice", "phid": "PHID-1"}]
+        check_events.return_value = False
+
+        def fail_gonzo(reviewers, *args):
             # Replace the check_for_invalid_reviewers() function with something that
             # fails if "gonzo" is in the reviewers list.
-            if "gonzo" in reviewers["request"]:
-                return ["gonzo"]
+            if "gonzo" in reviewers:
+                response = ["gonzo"]
             else:
-                return []
+                response = []
+            return response
 
         check_reviewers.side_effect = fail_gonzo
         repo = mozphab.Repository(None, None, "dummy")

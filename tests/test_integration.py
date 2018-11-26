@@ -32,6 +32,8 @@ def in_process(monkeypatch, safe_environ):
     # Disable update checking.  It modifies the program on disk which we do /not/ want
     # to do during a test run.
     monkeypatch.setattr(mozphab, "check_for_updates", mock.MagicMock())
+    monkeypatch.setattr(mozphab, "check_if_current_events", mock.MagicMock())
+    mozphab.check_if_current_events.return_value = False
 
     # Disable calls to sys.exit() at the end of the script.  Re-raise errors instead
     # to make test debugging easier.
@@ -55,7 +57,9 @@ def in_process(monkeypatch, safe_environ):
             {
                 "error": None,
                 "errorMessage": None,
-                "response": {"data": [{"fields": {"username": "alice"}}]},
+                "response": {
+                    "data": [{"fields": {"username": "alice"}, "phid": "PHID-1"}]
+                },
             }
         )
 
