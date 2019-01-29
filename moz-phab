@@ -367,6 +367,9 @@ class Config(object):
             [ui]
             no_ansi=false
 
+            [vcs]
+            safe_mode=false
+
             [arc]
             arc_command=arc
 
@@ -393,6 +396,7 @@ class Config(object):
             self._config.read([self._filename])
 
         self.no_ansi = self._config.getboolean("ui", "no_ansi")
+        self.safe_mode = self._config.getboolean("vcs", "safe_mode")
         self.arc_command = self._config.get("arc", "arc_command")
         self.auto_submit = self._config.getboolean("submit", "auto_submit")
         self.always_blocking = self._config.getboolean("submit", "always_blocking")
@@ -420,6 +424,7 @@ class Config(object):
         else:
             logger.debug("creating %s" % self._filename)
             self._set("ui", "no_ansi", self.no_ansi)
+            self._set("vcs", "safe_mode", self.safe_mode)
             self._set("arc", "arc_command", self.arc_command)
             self._set("submit", "auto_submit", self.auto_submit)
             self._set("submit", "always_blocking", self.always_blocking)
@@ -740,9 +745,6 @@ class Mercurial(Repository):
         # currently enabled so we can tailor our error accordingly.
         self.has_shelve = self._get_extension("shelve", hg_config) is not None
 
-        # Disable the user's hgrc file, to ensure we run without rogue extensions.
-        os.environ["HGRCPATH"] = ""
-
     @classmethod
     def is_repo(cls, path):
         """Quick check for repository at specified path."""
@@ -837,6 +839,10 @@ class Mercurial(Repository):
 
     def set_args(self, args):
         super(Mercurial, self).set_args(args)
+
+        # Disable the user's hgrc file, to ensure we run without rogue extensions.
+        if args.safe_mode or config.safe_mode:
+            os.environ["HGRCPATH"] = ""
 
         # Set the default start revision.
         if self.args.start_rev == "(auto)":
@@ -1151,12 +1157,6 @@ class Git(Repository):
                 ["-c", "cinnabar.helper=%s" % git_config["cinnabar.helper"]]
             )
 
-        # Ignore the user's Git config
-        # To make Git not read the `~/.gitconfig` we need to temporarily change the
-        # `$HOME` variable.
-        self._env["HOME"] = ""
-        self._env["XDG_CONFIG_HOME"] = ""
-
         # Store current branch (fails if HEAD in detached state)
         try:
             self.branch = self._get_current_head()
@@ -1279,6 +1279,13 @@ class Git(Repository):
     def set_args(self, args):
         """Store moz-phab command line args and set the revset."""
         super(Git, self).set_args(args)
+
+        if self.args.safe_mode or config.safe_mode:
+            # Ignore the user's Git config
+            # To make Git not read the `~/.gitconfig` we need to temporarily change the
+            # `$HOME` variable.
+            self._env["HOME"] = ""
+            self._env["XDG_CONFIG_HOME"] = ""
 
         if self.args.start_rev == "(auto)":
             start = self._get_first_unpublished_node()
@@ -2417,7 +2424,7 @@ def parse_args(argv):
         "--force-delete",
         action="store_true",
         help="Mercurial only. Override the fail if a DAG branch point detected "
-             "and no evolve installed",
+        "and no evolve installed",
     )
     submit_parser.add_argument(
         "--bug", "-b", help="Set Bug ID for all commits (default: from commit)"
@@ -2459,6 +2466,12 @@ def parse_args(argv):
         "-u",
         action="append",
         help='Set upstream branch to detect the starting commit. (default: "")',
+    )
+    submit_parser.add_argument(
+        "--safe-mode",
+        dest="safe_mode",
+        action="store_true",
+        help="Run VCS with only necessary extensions.",
     )
     submit_parser.add_argument(
         "start_rev",

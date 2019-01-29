@@ -159,11 +159,14 @@ def test_is_child(git):
     assert not is_child("ccc", "ddd", nodes)
 
 
-def test_range(git):
+@mock.patch("mozphab.config")
+def test_range(m_config, git):
     class Args:
         def __init__(self, start="aaa", end="."):
             self.start_rev = start
             self.end_rev = end
+            self.safe_mode = False
 
+    m_config.safe_mode = False
     git.set_args(Args())
     assert git.revset == ("aaa", ".")
