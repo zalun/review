@@ -71,6 +71,15 @@ GUIDE_URL = (
     "https://moz-conduit.readthedocs.io/en/latest/phabricator-user.html#quick-start"
 )
 
+# Arcanist
+MOZBUILD_PATH = os.path.join(os.path.expanduser("~"), ".mozbuild/moz-phab")
+LIBPHUTIL_PATH = os.path.join(MOZBUILD_PATH, "libphutil")
+ARC_PATH = os.path.join(MOZBUILD_PATH, "arcanist")
+ARC_COMMAND = os.path.join(ARC_PATH, "bin/arc")
+GITHUB = "https://github.com/%s"
+LIBPHUTIL_REPO = "phacility/libphutil.git"
+ARC_REPO = "mozilla-conduit/arcanist.git"
+
 # Auto-update
 SELF_REPO = "mozilla-conduit/review"
 SELF_UPDATE_FREQUENCY = 24 * 3  # hours
@@ -2159,6 +2168,17 @@ def parse_api_error(api_response):
         return response["errorMessage"]
 
 
+def install_arc_if_required():
+    if os.path.exists(ARC_COMMAND) and os.path.exists(LIBPHUTIL_PATH):
+        return
+
+    if not os.path.exists(MOZBUILD_PATH):
+        os.makedirs(MOZBUILD_PATH)
+
+    check_call(["git", "clone", GITHUB % ARC_REPO, ARC_PATH]) 
+    check_call(["git", "clone", GITHUB % LIBPHUTIL_REPO, LIBPHUTIL_PATH]) 
+
+
 def arc_ping(cwd):
     """Sends a ping to the Phabricator server using `conduit.ping` API.
 
@@ -2383,7 +2403,7 @@ def submit(repo, args):
 
     # Check if arc is configured
     if not repo.check_arc():
-        raise Error("Failed to run %s." % config.arc_command)
+        raise Error("Failed to run %s." % ARC_COMMAND)
 
     # Validate commit stack is suitable for review.
     show_commit_stack(repo, commits, show_warnings=True)
@@ -2552,7 +2572,7 @@ def get_self_release():
 
 
 def update_arc():
-    """Write the las check and update arc."""
+    """Write the last check and update arc."""
     try:
         check_call(config.arc + ["upgrade"])
     except subprocess.CalledProcessError:
@@ -2775,7 +2795,7 @@ def patch(repo, args):
 
     # Check if arc is configured
     if not repo.check_arc():
-        raise Error("Failed to run %s." % config.arc_command)
+        raise Error("Failed to run %s." % ARC_COMMAND)
 
     # Look for any uncommited changes
     if not args.raw and not repo.is_worktree_clean():
@@ -3153,12 +3173,14 @@ def main(argv):
         if config.no_ansi:
             HAS_ANSI = False
 
-        arc_path = which_path(config.arc_command)
+        install_arc_if_required()
+
+        arc_path = which_path(ARC_COMMAND)
         if not arc_path:
             raise Error(
                 "Failed to find '%s' on the system path.\n"
                 "Please follow the Phabricator setup guide:\n"
-                "%s" % (config.arc_command, GUIDE_URL)
+                "%s" % (ARC_COMMAND, GUIDE_URL)
             )
 
         config.arc = [arc_path]
