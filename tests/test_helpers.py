@@ -5,7 +5,7 @@ import json
 import mock
 import os
 import unittest
-import __builtin__
+import builtins
 
 import pytest
 
@@ -15,209 +15,204 @@ mozphab = imp.load_source(
 mozphab.SHOW_SPINNER = False
 
 
-class Helpers(unittest.TestCase):
-    @mock.patch("__builtin__.open")
-    @mock.patch("mozphab.json")
-    def test_read_json_field(self, m_json, m_open):
-        m_open.side_effect = IOError(errno.ENOENT, "Not a file")
-        self.assertEqual(None, mozphab.read_json_field(["nofile"], ["not existing"]))
+@mock.patch("builtins.open")
+@mock.patch("mozphab.json")
+def test_read_json_field(m_json, m_open):
+    m_open.side_effect = IOError(errno.ENOENT, "Not a file")
+    assert mozphab.read_json_field(["nofile"], ["not existing"]) is None
 
-        m_open.side_effect = IOError(errno.ENOTDIR, "Not a directory")
-        with self.assertRaises(IOError):
-            mozphab.read_json_field(["nofile"], ["not existing"])
+    m_open.side_effect = IOError(errno.ENOTDIR, "Not a directory")
+    with pytest.raises(IOError):
+        mozphab.read_json_field(["nofile"], ["not existing"])
 
-        m_open.side_effect = ValueError()
-        self.assertEqual(None, mozphab.read_json_field(["nofile"], ["not existing"]))
+    m_open.side_effect = ValueError()
+    assert mozphab.read_json_field(["nofile"], ["not existing"]) is None
 
-        m_open.side_effect = None
-        m_json.load.return_value = dict(a="value A", b=3)
-        self.assertEqual(None, mozphab.read_json_field(["filename"], ["not existing"]))
-        self.assertEqual("value A", mozphab.read_json_field(["filename"], ["a"]))
+    m_open.side_effect = None
+    m_json.load.return_value = dict(a="value A", b=3)
+    assert mozphab.read_json_field(["filename"], ["not existing"]) is None
+    assert mozphab.read_json_field(["filename"], ["a"]) == "value A"
 
-        m_json.load.side_effect = (
-            dict(a="value A", b=3),
-            dict(b="value B", c=dict(a="value CA")),
-        )
-        self.assertEqual(3, mozphab.read_json_field(["file_a", "file_b"], ["b"]))
-        m_json.load.side_effect = (
-            dict(b="value B", c=dict(a="value CA")),
-            dict(a="value A", b=3),
-        )
-        self.assertEqual(
-            "value B", mozphab.read_json_field(["file_b", "file_a"], ["b"])
-        )
-        m_json.load.side_effect = (
-            dict(a="value A", b=3),
-            dict(b="value B", c=dict(a="value CA")),
-        )
-        self.assertEqual(
-            "value CA", mozphab.read_json_field(["file_a", "file_b"], ["c", "a"])
-        )
+    m_json.load.side_effect = (
+        dict(a="value A", b=3),
+        dict(b="value B", c=dict(a="value CA")),
+    )
+    assert mozphab.read_json_field(["file_a", "file_b"], ["b"]) == 3
+    m_json.load.side_effect = (
+        dict(b="value B", c=dict(a="value CA")),
+        dict(a="value A", b=3),
+    )
+    assert mozphab.read_json_field(["file_b", "file_a"], ["b"]) == "value B"
+    m_json.load.side_effect = (
+        dict(a="value A", b=3),
+        dict(b="value B", c=dict(a="value CA")),
+    )
+    assert mozphab.read_json_field(["file_a", "file_b"], ["c", "a"]) == "value CA"
 
-    @mock.patch.object(__builtin__, "raw_input")
-    @mock.patch("mozphab.sys")
-    def test_prompt(self, m_sys, m_raw_input):
-        input_response = None
+@mock.patch.object(builtins, "input")
+@mock.patch("mozphab.sys")
+def test_prompt(m_sys, m_input):
+    input_response = None
 
-        def _raw_input(_):
-            return input_response
+    def _input(_):
+        return input_response
 
-        m_raw_input.side_effect = _raw_input
+    m_input.side_effect = _input
 
-        # Default
-        input_response = ""
-        self.assertEqual("AAA", mozphab.prompt("", ["AAA", "BBB"]))
+    # Default
+    input_response = ""
+    assert mozphab.prompt("", ["AAA", "BBB"]) == "AAA"
 
-        # Escape
-        m_sys.exit.side_effect = SystemExit()
-        with self.assertRaises(SystemExit):
-            input_response = chr(27)
-            mozphab.prompt("", ["AAA"])
+    # Escape
+    m_sys.exit.side_effect = SystemExit()
+    with pytest.raises(SystemExit):
+        input_response = chr(27)
+        mozphab.prompt("", ["AAA"])
 
-        input_response = "aaa"
-        self.assertEqual("AAA", mozphab.prompt("", ["AAA", "BBB"]))
-        input_response = "a"
-        self.assertEqual("AAA", mozphab.prompt("", ["AAA", "BBB"]))
-        input_response = "b"
-        self.assertEqual("BBB", mozphab.prompt("", ["AAA", "BBB"]))
+    input_response = "aaa"
+    assert mozphab.prompt("", ["AAA", "BBB"]) == "AAA"
+    input_response = "a"
+    assert mozphab.prompt("", ["AAA", "BBB"]) == "AAA"
+    input_response = "b"
+    assert mozphab.prompt("", ["AAA", "BBB"]) == "BBB"
 
-    @mock.patch("mozphab.probe_repo")
-    def test_repo_from_args(self, m_probe):
-        # TODO test walking the path
-        repo = None
+@mock.patch("mozphab.probe_repo")
+def test_repo_from_args(m_probe):
+    # TODO test walking the path
+    repo = None
 
-        def probe_repo(_):
-            return repo
+    def probe_repo(_):
+        return repo
 
-        m_probe.side_effect = probe_repo
+    m_probe.side_effect = probe_repo
 
-        class Args:
-            def __init__(self, path=None):
-                self.path = path
+    class Args:
+        def __init__(self, path=None):
+            self.path = path
 
-        with self.assertRaises(mozphab.Error):
-            mozphab.repo_from_args(Args(path="some path"))
+    with pytest.rais_es(mozphab.Error):
+        mozphab.repo_from_args(Args(path="some path"))
 
-        repo = mock.MagicMock()
-        args = Args(path="some path")
-        self.assertEqual(repo, mozphab.repo_from_args(args))
-        repo.set_args.assert_called_once_with(args)
+    repo = mock.MagicMock()
+    args = Args(path="some path")
+    assert mozphab.repo_from_args(args) == repo
+    repo.set_args.assert_called_once_with(args)
 
-    def test_arc_message(self):
-        self.assertEqual(
-            "Title\n\nSummary:\nMessage\n\n\n\nTest Plan:\n\n"
-            "Reviewers: reviewer\n\nSubscribers:\n\nBug #: 1",
-            mozphab.arc_message(
-                dict(title="Title", body="Message", reviewers="reviewer", bug_id=1)
-            ),
-        )
+def test_arc_message():
+    assert (
+        mozphab.arc_message(
+            dict(title="Title", body="Message", reviewers="reviewer", bug_id=1)
+        ) ==
+        "Title\n\nSummary:\nMessage\n\n\n\nTest Plan:\n\n"
+        "Reviewers: reviewer\n\nSubscribers:\n\nBug #: 1"
+    )
 
-        self.assertEqual(
-            "Title\n\nSummary:\nMessage\n\nDepends on D123\n\nTest Plan:\n\n"
-            "Reviewers: reviewer\n\nSubscribers:\n\nBug #: 1",
-            mozphab.arc_message(
-                dict(
-                    title="Title",
-                    body="Message",
-                    reviewers="reviewer",
-                    bug_id=1,
-                    depends_on="Depends on D123",
-                )
-            ),
-        )
+    assert (
+        mozphab.arc_message(
+            dict(
+                title="Title",
+                body="Message",
+                reviewers="reviewer",
+                bug_id=1,
+                depends_on="Depends on D123",
+            )
+        ) ==
+        "Title\n\nSummary:\nMessage\n\nDepends on D123\n\nTest Plan:\n\n"
+        "Reviewers: reviewer\n\nSubscribers:\n\nBug #: 1"
+    )
 
-        self.assertEqual(
-            "\n\nSummary:\n\n\n"
-            "\n\nTest Plan:"
-            "\n\nReviewers: "
-            "\n\nSubscribers:"
-            "\n\nBug #: ",
-            mozphab.arc_message(
-                dict(title=None, body=None, reviewers=None, bug_id=None)
-            ),
-        )
+    assert (
+        mozphab.arc_message(
+            dict(title=None, body=None, reviewers=None, bug_id=None)
+        ) ==
+        "\n\nSummary:\n\n\n"
+        "\n\nTest Plan:"
+        "\n\nReviewers: "
+        "\n\nSubscribers:"
+        "\n\nBug #: "
+    )
 
-    def test_strip_differential_revision_from_commit_body(self):
-        self.assertEqual("", mozphab.strip_differential_revision("\n\n"))
-        self.assertEqual(
-            "",
-            mozphab.strip_differential_revision(
-                "\nDifferential Revision: http://phabricator.test/D123"
-            ),
-        )
-        self.assertEqual(
-            "",
-            mozphab.strip_differential_revision(
-                "Differential Revision: http://phabricator.test/D123"
-            ),
-        )
-        self.assertEqual(
-            "title",
-            mozphab.strip_differential_revision(
-                "title\nDifferential Revision: http://phabricator.test/D123"
-            ),
-        )
-        self.assertEqual(
-            "title",
-            mozphab.strip_differential_revision(
-                "title\n\nDifferential Revision: http://phabricator.test/D123"
-            ),
-        )
-        self.assertEqual(
-            "title\n\nsummary",
-            mozphab.strip_differential_revision(
-                "title\n\n"
-                "summary\n\n"
-                "Differential Revision: http://phabricator.test/D123"
-            ),
-        )
+def test_strip_differential_revision_from_commit_body():
+    self.assertEqual("", mozphab.strip_differential_revision("\n\n"))
+    self.assertEqual(
+        "",
+        mozphab.strip_differential_revision(
+            "\nDifferential Revision: http://phabricator.test/D123"
+        ),
+    )
+    self.assertEqual(
+        "",
+        mozphab.strip_differential_revision(
+            "Differential Revision: http://phabricator.test/D123"
+        ),
+    )
+    self.assertEqual(
+        "title",
+        mozphab.strip_differential_revision(
+            "title\nDifferential Revision: http://phabricator.test/D123"
+        ),
+    )
+    self.assertEqual(
+        "title",
+        mozphab.strip_differential_revision(
+            "title\n\nDifferential Revision: http://phabricator.test/D123"
+        ),
+    )
+    self.assertEqual(
+        "title\n\nsummary",
+        mozphab.strip_differential_revision(
+            "title\n\n"
+            "summary\n\n"
+            "Differential Revision: http://phabricator.test/D123"
+        ),
+    )
 
-    def test_amend_commit_message_body_with_new_revision_url(self):
-        self.assertEqual(
-            "\nDifferential Revision: http://phabricator.test/D123",
-            mozphab.amend_revision_url("", "http://phabricator.test/D123"),
-        )
-        self.assertEqual(
-            "title\n\nDifferential Revision: http://phabricator.test/D123",
-            mozphab.amend_revision_url("title", "http://phabricator.test/D123"),
-        )
-        self.assertEqual(
-            "\nDifferential Revision: http://phabricator.test/D123",
-            mozphab.amend_revision_url(
-                "\nDifferential Revision: http://phabricator.test/D999",
-                "http://phabricator.test/D123",
-            ),
-        )
+def test_amend_commit_message_body_with_new_revision_url():
+    self.assertEqual(
+        "\nDifferential Revision: http://phabricator.test/D123",
+        mozphab.amend_revision_url("", "http://phabricator.test/D123"),
+    )
+    self.assertEqual(
+        "title\n\nDifferential Revision: http://phabricator.test/D123",
+        mozphab.amend_revision_url("title", "http://phabricator.test/D123"),
+    )
+    self.assertEqual(
+        "\nDifferential Revision: http://phabricator.test/D123",
+        mozphab.amend_revision_url(
+            "\nDifferential Revision: http://phabricator.test/D999",
+            "http://phabricator.test/D123",
+        ),
+    )
 
-    @mock.patch("mozphab.os.access")
-    @mock.patch("mozphab.os.path")
-    @mock.patch("mozphab.os.environ")
-    def test_which_a(self, m_os_environ, m_os_path, m_os_access):
-        m_os_environ.get.return_value = "/one:/two"
-        m_os_path.expanduser = lambda x: x
-        m_os_path.normcase = lambda x: x
-        m_os_path.join = lambda x, y: "%s/%s" % (x, y)
-        m_os_path.exists.side_effect = (False, True)
-        m_os_access.return_value = True
-        m_os_path.isdir.return_value = False
+@mock.patch("mozphab.os.access")
+@mock.patch("mozphab.os.path")
+@mock.patch("mozphab.os.environ")
+def test_which_a(m_os_environ, m_os_path, m_os_access):
+    m_os_environ.get.return_value = "/one:/two"
+    m_os_path.expanduser = lambda x: x
+    m_os_path.normcase = lambda x: x
+    m_os_path.join = lambda x, y: "%s/%s" % (x, y)
+    m_os_path.exists.side_effect = (False, True)
+    m_os_access.return_value = True
+    m_os_path.isdir.return_value = False
 
-        path = "x"
-        self.assertEqual("/two/x", mozphab.which(path))
+    path = "x"
+    self.assertEqual("/two/x", mozphab.which(path))
 
-    @mock.patch("mozphab.os.access")
-    @mock.patch("mozphab.os.path")
-    @mock.patch("mozphab.os.environ")
-    @mock.patch("mozphab.which")
-    def test_which_b(self, m_which, _os_environ, m_os_path, m_os_access):
-        m_os_path.exists.side_effect = (True, False)
-        m_os_access.return_value = True
-        m_os_path.isdir.return_value = False
+@mock.patch("mozphab.os.access")
+@mock.patch("mozphab.os.path")
+@mock.patch("mozphab.os.environ")
+@mock.patch("mozphab.which")
+def test_which_b(m_which, _os_environ, m_os_path, m_os_access):
+    m_os_path.exists.side_effect = (True, False)
+    m_os_access.return_value = True
+    m_os_path.isdir.return_value = False
 
-        path = "x"
-        self.assertEqual(path, mozphab.which_path(path))
-        m_which.assert_not_called()
-        mozphab.which_path(path)
-        m_which.assert_called_once_with(path)
+    path = "x"
+    self.assertEqual(path, mozphab.which_path(path))
+    m_which.assert_not_called()
+    mozphab.which_path(path)
+    m_which.assert_called_once_with(path)
 
 
 @mock.patch("mozphab.ConduitAPI.call")

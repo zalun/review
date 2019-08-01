@@ -17,7 +17,7 @@ Goals:
 import argparse
 import base64
 import calendar
-import ConfigParser
+import configparser
 import datetime
 import errno
 import io
@@ -36,8 +36,8 @@ import tempfile
 import threading
 import time
 import traceback
-import urllib2
-import urlparse
+import urllib.request, urllib.error, urllib.parse
+import urllib.parse
 import uuid
 from collections import namedtuple
 from contextlib import contextmanager
@@ -373,7 +373,7 @@ def prompt(question, options):
     options_map = {o[0].lower(): o for o in options}
     options_map[""] = options[0]
     while True:
-        res = raw_input(prompt_str)
+        res = input(prompt_str)
         if len(res) > 1:
             res = res[0].lower()
         if res == chr(27):  # escape
@@ -534,7 +534,7 @@ class Config(object):
         self.name = "~/.moz-phab-config"  # human-readable name
 
         # Default values.
-        defaults = u"""
+        defaults = """
             [ui]
             no_ansi = False
 
@@ -559,7 +559,7 @@ class Config(object):
             arc_last_check = 0
             """
 
-        self._config = ConfigParser.SafeConfigParser()
+        self._config = configparser.SafeConfigParser()
         self._config.readfp(
             io.StringIO("\n".join([l.strip() for l in defaults.splitlines()]))
         )
@@ -645,14 +645,14 @@ def json_args_to_query_params(args):
             for (index, elem) in enumerate(v):
                 convert("{}[{}]".format(path, index), elem)
         elif type(v) == dict:
-            for (k, val) in v.iteritems():
+            for (k, val) in v.items():
                 convert("{}[{}]".format(path, k), val)
-        elif type(v) == unicode:
+        elif type(v) == str:
             params.append((path, v))
         else:
             params.append((path, str(v)))
 
-    for (key, value) in args.iteritems():
+    for (key, value) in args.items():
         convert(key, value)
 
     return params
@@ -695,7 +695,7 @@ class ConduitAPI:
         Raises:
             ConduitAPIError if the API threw an error back at us.
         """
-        url = urlparse.urljoin(self.repo.api_url, api_method)
+        url = urllib.parse.urljoin(self.repo.api_url, api_method)
         logger.debug("%s %s" % (url, api_call_args))
 
         api_call_params = json_args_to_query_params(api_call_args)
@@ -708,12 +708,12 @@ class ConduitAPI:
         api_call_params = json_args_to_query_params(api_call_args)
         data = "&".join(
             [
-                "{}={}".format(k, urllib2.quote(v.encode("utf8")))
+                "{}={}".format(k, urllib.parse.quote(v.encode("utf8")))
                 for (k, v) in api_call_params
             ]
         )
 
-        output = urllib2.urlopen(urllib2.Request(url, data=data), timeout=30).read()
+        output = urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=30).read()
         response = json.loads(output)
 
         if response["error_code"] and response["error_info"]:
@@ -772,7 +772,7 @@ class ConduitAPI:
                     if "rev-id-%s" % rev_id in cache
                 ]
             )
-            found_phids = phids_by_id.values()
+            found_phids = list(phids_by_id.values())
             query_field = "ids"
             query_values = [
                 int(rev_id) for rev_id in set(ids) - set(phids_by_id.keys())
@@ -1249,14 +1249,14 @@ class Diff:
             raise "unsupported change type %s" % kind
 
     def upload_files(self):
-        for change in self.changes.values():
+        for change in list(self.changes.values()):
             for upload in change.uploads:
                 upload["phid"] = conduit.file_upload(upload["value"])
 
     def submit(self, repo_phid, commit, message):
         changes = [
             change.to_conduit(conduit.repo.get_public_node(commit["node"]))
-            for change in self.changes.values()
+            for change in list(self.changes.values())
         ]
         diff = conduit.create_diff(
             changes, conduit.repo.get_public_node(commit["parent"])
@@ -1465,7 +1465,7 @@ class Repository(object):
             # Flatten and deduplicate reviewer list, keeping track of the
             # associated commit
             for commit in commits:
-                for group in commit["reviewers"].keys():
+                for group in list(commit["reviewers"].keys()):
                     for reviewer in commit["reviewers"][group]:
                         all_reviewers.setdefault(group, set())
                         all_reviewers[group].add(reviewer)
@@ -1548,7 +1548,7 @@ class Repository(object):
     def _api_url(self):
         """Return a base URL for conduit API call
         """
-        return urlparse.urljoin(self.phab_url, "api/")
+        return urllib.parse.urljoin(self.phab_url, "api/")
 
     @property
     def phab_repo(self):
@@ -2288,7 +2288,7 @@ class Git(Repository):
         """Rebase all branches based on changed commits from the stack."""
         branches_to_rebase = self._find_branches_to_rebase(commits)
 
-        for branch, nodes in branches_to_rebase.iteritems():
+        for branch, nodes in branches_to_rebase.items():
             self.checkout(branch)
             self._rebase(*nodes)
 
@@ -3182,7 +3182,7 @@ def check_for_invalid_reviewers(reviewers):
     # Combine the lists of requested reviewers and granted reviewers.
     all_reviewers = []
     found_names = []
-    for sublist in reviewers.values():
+    for sublist in list(reviewers.values()):
         all_reviewers.extend(
             [
                 normalise_reviewer(r, strip_group=False)
@@ -3201,7 +3201,7 @@ def check_for_invalid_reviewers(reviewers):
     # Group reviewers are represented by a "#" prefix
     all_groups = []
     found_groups = []
-    for sublist in reviewers.values():
+    for sublist in list(reviewers.values()):
         all_groups.extend(
             [
                 normalise_reviewer(r, strip_group=False)
@@ -3224,7 +3224,7 @@ def check_for_invalid_reviewers(reviewers):
                 found_groups.extend(
                     [
                         "#%s" % normalise_reviewer(r)
-                        for r in result["maps"]["slugMap"].keys()
+                        for r in list(result["maps"]["slugMap"].keys())
                     ]
                 )
         except KeyError:
@@ -3386,7 +3386,7 @@ def arc_message(template_vars):
     """Build arc commit desc message from the template"""
 
     # Map `None` to an empty string.
-    for name in template_vars.keys():
+    for name in list(template_vars.keys()):
         if template_vars[name] is None:
             template_vars[name] = ""
 
@@ -3826,8 +3826,8 @@ def get_self_release():
 
     # Grab release json from github's api, using a very short timeout.
     try:
-        release = json.load(urllib2.urlopen(releases_api_url, timeout=5))
-    except (urllib2.HTTPError, urllib2.URLError) as e:
+        release = json.load(urllib.request.urlopen(releases_api_url, timeout=5))
+    except (urllib.error.HTTPError, urllib.error.URLError) as e:
         raise Error("Failed to check for updates: %s" % e)
     except ValueError:
         raise Error("Malformed response from GitHub when checking for updates")
@@ -3930,11 +3930,11 @@ def self_update(args):
     )
     logger.debug("updating '%s' from %s" % (SELF_FILE, url))
     try:
-        gh = urllib2.urlopen(url)
+        gh = urllib.request.urlopen(url)
         with open(SELF_FILE, "wb") as fh:
             fh.write(gh.read())
         os.chmod(SELF_FILE, stat.S_IRWXU)
-    except (urllib2.HTTPError, urllib2.URLError) as e:
+    except (urllib.error.HTTPError, urllib.error.URLError) as e:
         raise Error("Failed to download update: %s" % e)
 
     logger.info("%s updated" % SELF_FILE)

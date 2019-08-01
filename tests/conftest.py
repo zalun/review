@@ -100,7 +100,7 @@ def hg_repo_path(monkeypatch, tmp_path):
     repo_path.mkdir()
     monkeypatch.chdir(str(repo_path))
     arcconfig = repo_path / ".arcconfig"
-    arcconfig.write_text(unicode(json.dumps({"phabricator.uri": phabricator_uri})))
+    arcconfig.write_text(str(json.dumps({"phabricator.uri": phabricator_uri})))
     hg_out("init")
     # graphshorten changes `log --graph` output, force to false
     with open(".hg/hgrc", "a") as f:
@@ -123,7 +123,7 @@ def git_repo_path(monkeypatch, tmp_path):
     repo_path.mkdir()
     monkeypatch.chdir(str(repo_path))
     arcconfig = repo_path / ".arcconfig"
-    arcconfig.write_text(unicode(json.dumps({"phabricator.uri": phabricator_uri})))
+    arcconfig.write_text(str(json.dumps({"phabricator.uri": phabricator_uri})))
     git_out("init")
     git_out("add", ".")
     git_out("commit", "--message", "initial commit")
@@ -155,7 +155,7 @@ def in_process(monkeypatch, safe_environ, request):
     # to make test debugging easier.
     def reraise(*args, **kwargs):
         t, v, tb = sys.exc_info()
-        raise (t, v, tb)
+        raise t
 
     monkeypatch.setattr(sys, "exit", reraise)
 

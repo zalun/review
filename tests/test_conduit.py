@@ -29,7 +29,7 @@ def test_set_args_from_repo():
 
 
 args_query_testdata = [
-    [dict(a=u"Ą"), [("a", u"Ą")]],
+    [dict(a="Ą"), [("a", "Ą")]],
     [dict(a="A", B="b"), [("a", "A"), ("B", "b")]],
     [dict(a=1), [("a", "1")]],
     [dict(arr=["a", 1, 2]), [("arr[0]", "a"), ("arr[1]", "1"), ("arr[2]", "2")]],
@@ -70,7 +70,7 @@ def test_call(m_token, m_urlopen, m_Request):
     )
     m_urlopen.assert_called_once()
 
-    assert mozphab.conduit.call("method", dict(call=u"ćwikła")) == "x"
+    assert mozphab.conduit.call("method", dict(call="ćwikła")) == "x"
     m_Request.assert_called_with(
         "http://api_url/method", data="api.token=token&call=%C4%87wik%C5%82a"
     )

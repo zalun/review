@@ -21,7 +21,7 @@ def reviewers_dict(reviewers=None):
     )
 
 
-def commit(bug_id=None, reviewers=None, body=u"", name="", title="", rev_id=None):
+def commit(bug_id=None, reviewers=None, body="", name="", title="", rev_id=None):
     return {
         "name": name,
         "title": title,
