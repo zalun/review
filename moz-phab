@@ -348,23 +348,44 @@ def read_json_field(files, field_path):
     return None
 
 
-def prompt(question, options):
+def save_json_field(filename, data):
+    """Updates the file contents with data."""
+    with open(filename, "w+") as f:
+        try:
+            rc = json.load(f)
+        except ValueError:
+            rc = {}
+
+        rc.update(data)
+        json.dump(rc, f, sort_keys=True, indent=4)
+
+
+def prompt(question, options=None):
     if HAS_ANSI:
         question = "\033[33m%s\033[0m" % question
-    prompt_options = list(options)
-    prompt_options[0] = prompt_options[0].upper()
-    prompt_str = "%s (%s)? " % (question, "/".join(prompt_options))
 
-    options_map = {o[0].lower(): o for o in options}
-    options_map[""] = options[0]
+    prompt_str = question
+    if options:
+        prompt_options = list(options)
+        prompt_options[0] = prompt_options[0].upper()
+        prompt_str = "%s (%s)? " % (question, "/".join(prompt_options))
+
+        options_map = {o[0].lower(): o for o in options}
+        options_map[""] = options[0]
     while True:
-        res = input(prompt_str)
+        response = input(prompt_str)
+        res = response
         if len(res) > 1:
             res = res[0].lower()
         if res == chr(27):  # escape
             sys.exit(1)
-        if res in options_map:
-            return options_map[res]
+        if options:
+            if res in options_map:
+                return options_map[res]
+            else:
+                return False
+
+        return response
 
 
 def parse_config(config_list, filter_func=None):
@@ -664,6 +685,11 @@ class ConduitAPI:
         if not token:
             raise ConduitAPIError(INSTALL_CERT_MSG)
         return token
+
+    def save_api_token(self, token):
+        save_json_field(
+            get_arcrc_path(), {"hosts": {self.repo.api_url: {"token": token}}}
+        )
 
     def call(self, api_method, api_call_args):
         """Call Conduit API and return the JSON API call result.
@@ -3441,6 +3467,27 @@ def arc_ping(cwd):
 
 
 #
+# "install-certificate" command
+
+
+def install_certificate(repo, args):
+    """Asks user to enter the Phabricator's certificate. Saves it in the .arcrc"""
+    token = prompt(
+        """\
+LOGIN TO PHABRICATOR
+Open this page in your browser and login to Phabricator if necessary:
+
+%s/conduit/login/
+
+Then paste the API Token on that page below.
+
+    Paste API Token from that page: """
+        % conduit.repo.phab_url
+    )
+    conduit.save_api_token(token)
+
+
+#
 # "submit" Command
 #
 
@@ -4521,7 +4568,13 @@ def parse_args(argv):
     cert_parser = commands.add_parser(
         "install-certificate", help="Install Phabricator certificate locally"
     )
-    cert_parser.set_defaults(func=arc_install_certificate, needs_repo=False)
+    cert_parser.add_argument(
+        "--safe-mode",
+        dest="safe_mode",
+        action="store_true",
+        help="Run VCS with only necessary extensions.",
+    )
+    cert_parser.set_defaults(func=install_certificate, needs_repo=True)
 
     # arc
 
