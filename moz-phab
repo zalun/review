@@ -25,6 +25,7 @@ import json
 import logging
 import logging.handlers
 import mimetypes
+import operator
 import os
 import re
 import signal
@@ -1048,23 +1049,22 @@ class ConduitAPI:
         return self.call("differential.creatediff", api_call_args)
 
     def set_diff_property(self, diff_id, commit, message):
+        data = {
+            commit["node"]: {
+                "author": commit["author-name"],
+                "authorEmail": commit["author-email"],
+                "time": 0,
+                "summary": commit["title-preview"],
+                "message": message,
+                "commit": conduit.repo.get_public_node(commit["node"]),
+                "parents": [conduit.repo.get_public_node(commit["parent"])],
+            }
+        }
+        if "tree-hash" in commit:
+            data["tree"] = commit["tree-hash"]
+
         api_call_args = dict(
-            diff_id=diff_id,
-            name="local:commits",
-            data=json.dumps(
-                {
-                    commit["node"]: {
-                        "author": commit["author-name"],
-                        "authorEmail": commit["author-email"],
-                        "time": 0,
-                        "summary": commit["title-preview"],
-                        "message": message,
-                        "commit": conduit.repo.get_public_node(commit["node"]),
-                        "tree": commit["tree-hash"],
-                        "parents": [conduit.repo.get_public_node(commit["parent"])],
-                    }
-                }
-            ),
+            diff_id=diff_id, name="local:commits", data=json.dumps(data)
         )
         self.call("differential.setdiffproperty", api_call_args)
 
@@ -1285,9 +1285,12 @@ class Diff:
                 upload["phid"] = conduit.file_upload(upload["value"])
 
     def submit(self, repo_phid, commit, message):
+        files_changed = sorted(
+            self.changes.values(), key=operator.attrgetter("cur_path")
+        )
         changes = [
             change.to_conduit(conduit.repo.get_public_node(commit["node"]))
-            for change in list(self.changes.values())
+            for change in files_changed
         ]
         diff = conduit.create_diff(
             changes, conduit.repo.get_public_node(commit["parent"])
@@ -1298,6 +1301,16 @@ class Diff:
         conduit.set_diff_property(diff["diffid"], commit, message)
 
         return diff["phid"]
+
+    @staticmethod
+    def parse_git_diff(lines):
+        hdr = lines.pop(0)
+        m = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", hdr, re.I)
+        old_off = int(m.group(1))
+        old_len = int(m.group(2) or 1)
+        new_off = int(m.group(3))
+        new_len = int(m.group(4) or 1)
+        return old_off, new_off, old_len, new_len
 
 
 #
@@ -1893,7 +1906,14 @@ class Mercurial(Repository):
         # Grab all the info we need about the commits, using randomness as a delimiter.
         boundary = "--%s--\n" % uuid.uuid4().hex
         hg_log = self.hg_out(
-            ["log", "-T", "{rev} {node} {desc}%s" % boundary, "-r", self.revset],
+            [
+                "log",
+                "-T",
+                "{rev}\n{node}\n{date|rfc822date}\n{author|person}\n{author|email}\n"
+                "{desc}%s" % boundary,
+                "-r",
+                self.revset,
+            ],
             split=False,
             strip=False,
         )[: -len(boundary)]
@@ -1906,7 +1926,9 @@ class Mercurial(Repository):
         nodes = []
         branching_children = []
         for log_line in hg_log.split(boundary):
-            rev, node, desc = log_line.split(" ", 2)
+            rev, node, author_date, author_name, author_email, desc = log_line.split(
+                "\n", 5
+            )
             desc = desc.splitlines()
 
             children = self.hg_log("children(%s)" % node)
@@ -1925,6 +1947,9 @@ class Mercurial(Repository):
                     "bug-id": None,
                     "reviewers": dict(request=[], granted=[]),
                     "rev-id": None,
+                    "author-date": author_date,
+                    "author-name": author_name,
+                    "author-email": author_email,
                 }
             )
             nodes.append(node)
@@ -2183,9 +2208,257 @@ class Mercurial(Repository):
         )
 
     def get_diff(self, commit):
-        raise NotImplementedError(
-            "Mercurial revisions can't be submitted without Arcanist"
+        """Create a Diff object containing all changes for this commit."""
+        commit["parent"] = self._get_parent(commit["node"])
+
+        # Determine file modes
+        old_modes = self.hg_out(
+            ["manifest", "--debug", "--pager", "never", "-r", commit["parent"]]
         )
+        new_modes = self.hg_out(
+            ["manifest", "--debug", "--pager", "never", "-r", commit["node"]]
+        )
+        file_modes = {}
+        for s_info in old_modes:
+            info = s_info.split(None, 2)
+            file_modes[info[2]] = dict(old_mode=info[1])
+
+        for s_info in new_modes:
+            info = s_info.split(None, 2)
+            file_modes.setdefault(info[2], dict())
+            file_modes[info[2]]["new_mode"] = info[1]
+
+        # Get changed files.
+        b1 = "--%s--" % uuid.uuid4().hex
+        b2 = "--%s--" % uuid.uuid4().hex
+        all_files = self.hg_out(
+            [
+                "log",
+                "-r",
+                commit["node"],
+                "-T",
+                "{{join(file_adds, '{b1}')}}{b2}"
+                "{{join(file_dels, '{b1}')}}{b2}"
+                "{{join(file_mods, '{b1}')}}{b2}"
+                "{{join(file_copies, '{b1}')}}".format(b1=b1, b2=b2),
+            ],
+            split=False,
+        )
+        fn_adds, fn_dels, fn_mods, fn_renames_str = [
+            fn.split(b1) for fn in all_files.split(b2)
+        ]
+        changes = []
+
+        # Converting to tuples as `fn_copies` returns a "new filename (old filename)"
+        fn_renames = []
+        for fn in fn_renames_str:
+            m = re.match(r"([^(]+) \(([^)]+)\)", fn)
+            if m:
+                changes.append(
+                    dict(
+                        fn=m.group(1),
+                        old_fn=m.group(2),
+                        kind="R",
+                        func=self._change_mod,
+                    )
+                )
+                fn_renames.append((m.group(1), m.group(2)))
+
+        # remove renames from adds and dels
+        fn_adds = [fn for fn in fn_adds if fn and fn not in [c[0] for c in fn_renames]]
+        fn_dels = [fn for fn in fn_dels if fn and fn not in [c[1] for c in fn_renames]]
+
+        # remove empty string from mods
+        fn_mods = [fn for fn in fn_mods if fn]
+
+        changes.extend([dict(fn=fn, kind="A", func=self._change_add) for fn in fn_adds])
+        changes.extend([dict(fn=fn, kind="D", func=self._change_del) for fn in fn_dels])
+        changes.extend([dict(fn=fn, kind="M", func=self._change_mod) for fn in fn_mods])
+
+        # Create changes.
+        diff = Diff()
+        for c in changes:
+            change = diff.change_for(c["fn"])
+            old_fn = c["old_fn"] if "old_fn" in c else c["fn"]
+            c["func"](change, c["fn"], old_fn, commit["parent"], commit["node"])
+            a_mode = (
+                file_modes[old_fn]["old_mode"]
+                if old_fn in file_modes and "old_mode" in file_modes[old_fn]
+                else "000000"
+            )
+            b_mode = (
+                file_modes[c["fn"]]["new_mode"]
+                if c["fn"] in file_modes and "new_mode" in file_modes[c["fn"]]
+                else "000000"
+            )
+            diff.set_change_kind(change, c["kind"], a_mode, b_mode, old_fn, c["fn"])
+
+        return diff
+
+    def hg_cat(self, fn, node):
+        return self.hg_out(["cat", "-r", node, fn], split=False, expect_binary=True)
+
+    def _file_size(self, fn, node):
+        info = self.hg_out(
+            ["files", "-v", "-r", node, os.path.join(self.path, fn)], split=False
+        ).lstrip()
+        return int(info.split(" ")[0])
+
+    def _get_file_meta(self, fn, node):
+        binary = False
+        body = self.hg_cat(fn, node)
+        meta = dict(mime=None)
+
+        meta["file_size"] = self._file_size(fn, node)
+        if meta["file_size"] > MAX_TEXT_SIZE:
+            binary = True
+
+        if not binary:
+            if b"\0" in body:
+                binary = True
+
+        if not binary:
+            try:
+                body = str(body, "utf-8")
+            except UnicodeDecodeError:
+                binary = True
+
+        meta["body"] = body
+        meta["binary"] = binary
+
+        if binary:
+            meta["mime"] = mimetypes.guess_type(fn)[0] or ""
+        else:
+            meta["lines"] = len(body.split("\n"))
+
+        return meta
+
+    def _change_add(self, change, fn, _, parent, node):
+        """Add file change."""
+        meta = self._get_file_meta(fn, node)
+        if meta["binary"]:
+            self._change_set_binary(change, "", meta["body"], "", meta["mime"])
+        else:
+            lines = meta["body"].splitlines(True)
+            lines = ["+%s" % l for l in lines]
+            self._change_create_hunk(
+                change, fn, lines, meta["file_size"], parent, node, 0, 1, 0, len(lines)
+            )
+
+    def _change_del(self, change, fn, _, parent, node):
+        """Delete file change."""
+        meta = self._get_file_meta(fn, parent)
+        if meta["binary"]:
+            self._change_set_binary(change, meta["body"], "", meta["mime"], "")
+        else:
+            lines = meta["body"].splitlines(True)
+            lines = ["-%s" % l for l in lines]
+            self._change_create_hunk(
+                change, fn, lines, meta["file_size"], parent, node, 1, 0, len(lines), 0
+            )
+
+    def _change_mod(self, change, fn, old_fn, parent, node):
+        """Modify or rename change."""
+        a_meta = self._get_file_meta(old_fn, parent)
+        b_meta = self._get_file_meta(fn, node)
+        if a_meta["binary"] or b_meta["binary"]:
+            self._change_set_binary(
+                change, a_meta["body"], b_meta["body"], a_meta["mime"], b_meta["mime"]
+            )
+        else:
+            file_size = max(a_meta["file_size"], b_meta["file_size"])
+            if a_meta["body"] == b_meta["body"]:
+                lines = a_meta["body"].splitlines(True)
+                lines = [" %s" % l for l in lines]
+                old_off = new_off = 1
+                old_len = new_len = len(lines)
+            else:
+                if self.args.lesscontext or file_size > MAX_CONTEXT_SIZE:
+                    context_size = 100
+                else:
+                    context_size = MAX_CONTEXT_SIZE
+
+                git_diff = self.hg_out(
+                    ["diff", "--git", "-U%s" % context_size, "-r", parent, fn],
+                    split=False,
+                )
+                lines = []
+                found_hdr = False
+                for line in git_diff.splitlines(True):
+                    if not found_hdr:
+                        found_hdr = line.startswith("@@")
+
+                    if found_hdr:
+                        lines.append(line)
+
+                old_off, new_off, old_len, new_len = Diff.parse_git_diff(lines)
+
+            self._change_create_hunk(
+                change,
+                fn,
+                lines,
+                file_size,
+                parent,
+                node,
+                old_off,
+                new_off,
+                old_len,
+                new_len,
+            )
+
+    def _change_set_binary(self, change, a_body, b_body, a_mime, b_mime):
+        """Sets `Change` object as binary."""
+        change.binary = True
+        change.uploads = [
+            {"type": "old", "value": a_body, "mime": a_mime, "phid": None},
+            {"type": "new", "value": b_body, "mime": b_mime, "phid": None},
+        ]
+        if a_mime.startswith("image/") or b_mime.startswith("image/"):
+            change.file_type = Diff.FileType("IMAGE")
+        else:
+            change.file_type = Diff.FileType("BINARY")
+
+    def _change_create_hunk(
+        self,
+        change,
+        fn,
+        lines,
+        file_size,
+        parent,
+        node,
+        old_off,
+        new_off,
+        old_len,
+        new_len,
+    ):
+        # Collect some stats about the diff, and generate the corpus we
+        # want to send to Phabricator.
+        old_eof_newline = True
+        new_eof_newline = True
+        old_line = " "
+        corpus = "".join(lines)
+        for line in lines:
+            if line.endswith("No newline at end of file"):
+                if old_line[0] != "+":
+                    old_eof_newline = False
+                if old_line[0] != "-":
+                    new_eof_newline = False
+            old_line = line
+
+        change.hunks = [
+            Diff.Hunk(
+                old_off=old_off,
+                old_len=old_len,
+                new_off=new_off,
+                new_len=new_len,
+                old_eof_newline=old_eof_newline,
+                new_eof_newline=new_eof_newline,
+                added=sum(1 for l in lines if l[0] == "+"),
+                deleted=sum(1 for l in lines if l[0] == "-"),
+                corpus=corpus,
+            )
+        ]
+        change.file_type = Diff.FileType("TEXT")
 
 
 #
@@ -2903,12 +3176,7 @@ class Git(Repository):
                     ["diff", "-U%s" % context_size, a_blob, b_blob], split=False
                 )
                 lines = git_diff.splitlines(True)[4:]
-                hdr = lines.pop(0)
-                m = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", hdr, re.I)
-                old_off = int(m.group(1))
-                old_len = int(m.group(2) or 1)
-                new_off = int(m.group(3))
-                new_len = int(m.group(4) or 1)
+                old_off, new_off, old_len, new_len = Diff.parse_git_diff(lines)
 
             # Collect some stats about the diff, and generate the corpus we
             # want to send to Phabricator.

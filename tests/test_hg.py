@@ -268,6 +268,4 @@ def test_check_node(m_is_node, hg):
     assert "" == str(e.value)
 
 
-def test_no_arc_not_implemented(hg):
-    with pytest.raises(NotImplementedError):
-        hg.get_diff(None)
+# XXX add tests for no-arc submit commands

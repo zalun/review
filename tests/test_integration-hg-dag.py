@@ -29,7 +29,7 @@ def _init_repo(hg_repo_path):
     test_file = hg_repo_path / "X"
     test_file.write_text("R0")
     hg_out("commit", "--addremove", "--message", "R0")
-    return dict(test_file=test_file, rev=0, rev_map={"R0": "0"})
+    return dict(test_file=test_file, rev=1, rev_map={"R0": "1"})
 
 
 def _add_commit(repo, parent, name):
@@ -70,6 +70,8 @@ o  B1
 o  Bug 1 - A1
 |
 o  R0
+|
+o  init
 """,
     )
 
@@ -92,6 +94,8 @@ def test_submit_single_2(in_process, hg_repo_path):
 o  Bug 1 - A1
 |
 o  R0
+|
+o  init
 """,
     )
 
@@ -117,6 +121,8 @@ o  B1
 o  Bug 1 - A1
 |
 o  R0
+|
+o  init
 """,
     )
 
@@ -137,6 +143,8 @@ o  Bug 1 - B1
 @  Bug 1 - A1
 |
 o  R0
+|
+o  init
 """,
     )
 
@@ -159,6 +167,8 @@ o  Bug 1 - B1
 o  Bug 1 - A1
 |
 o  R0
+|
+o  init
 """,
     )
 
@@ -184,5 +194,7 @@ o  Bug 1 - B1
 o  Bug 1 - A1
 |
 o  R0
+|
+o  init
 """,
     )
