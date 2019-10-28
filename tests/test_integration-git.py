@@ -79,7 +79,7 @@ def test_submit_create(in_process, git_repo_path, init_sha):
         dict(object=dict(id="123")),
     )
     testfile = git_repo_path / "X"
-    testfile.write_text("ą")
+    testfile.write_text("ą\r\nb\nc")
     git_out("add", ".")
     msgfile = git_repo_path / "msg"
     msgfile.write_text("Ą r?alice")
@@ -108,6 +108,7 @@ Differential Revision: http://example.test/D123
         )
         in call_conduit.call_args_list
     )
+    print(call_conduit.call_args_list)
     assert (
         mock.call(
             "differential.creatediff",
@@ -129,14 +130,14 @@ Differential Revision: http://example.test/D123
                         "oldPath": None,
                         "hunks": [
                             {
-                                "corpus": "+ą",
-                                "addLines": 1,
                                 "oldOffset": 0,
-                                "newOffset": 1,
-                                "newLength": 1,
-                                "delLines": 0,
-                                "isMissingOldNewline": False,
                                 "oldLength": 0,
+                                "newOffset": 1,
+                                "newLength": 3,
+                                "addLines": 3,
+                                "delLines": 0,
+                                "corpus": "+ą\r\n+b\n+c",
+                                "isMissingOldNewline": False,
                                 "isMissingNewNewline": False,
                             }
                         ],
