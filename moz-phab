@@ -4636,6 +4636,10 @@ def patch(repo, args):
         logger.warning("D%s applied" % rev_id)
 
 
+def close_revision(args):
+    print(args.revision_id)
+
+
 def arc_pass(args):
     if DEBUG:
         ARC.append("--trace")
@@ -4912,6 +4916,19 @@ def parse_args(argv):
         help="Run VCS with only necessary extensions.",
     )
     cert_parser.set_defaults(func=install_certificate, needs_repo=True, no_arc=True)
+
+    # close-revision
+
+    close_parser = commands.add_parser(
+        "close-revision", help="Close an accepted revision"
+    )
+    close_parser.add_argument(
+        "revision_id", type=check_revision_id, help="Revision number"
+    )
+    close_parser.add_argument(
+        "--force", "-f", action="store_true", help="Close revision even if not accepted"
+    )
+    close_parser.set_defaults(func=close_revision, needs_repo=False, no_arc=True)
 
     # arc
 
