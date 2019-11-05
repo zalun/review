@@ -1721,6 +1721,17 @@ class Repository(object):
 
         return self._phid
 
+    def check_vcs(self):
+        """`Git.check_vcs` raises if cinnabar required and not installed."""
+        if self.args.force_vcs:
+            return
+
+        if self.vcs != self.phab_vcs:
+            raise Error(
+                "Local VCS ({local}) is different from the one defined in the "
+                "repository ({remote}).".format(local=self.vcs, remote=self.phab_vcs)
+            )
+
     @property
     def phab_vcs(self):
         """Version Control System short name stored in Phabricator.
@@ -3021,8 +3032,8 @@ class Git(Repository):
         """
         hashtag = node
         if not self.is_node(hashtag):
-            if "cinnabar" in self.extensions:
-                hashtag = self.git_out(["cinnabar", "hg2git", hashtag], split=False)
+            if self.is_cinnabar_required and self.is_cinnabar_installed:
+                hashtag = self._hg_to_git(hashtag)
                 if hashtag == "0" * 40:
                     # hashtag is not found via hg2git
                     raise NotFoundError(
@@ -3378,16 +3389,15 @@ class Git(Repository):
 
         return diff
 
-    @property
-    def phab_vcs(self):
-        phab_vcs = super(Git, self).phab_vcs
-        if self.vcs != phab_vcs:
-            if not self.is_cinnabar_installed and not self.args.force_vcs:
+    def check_vcs(self):
+        if self.args.force_vcs:
+            return
+
+        if self.vcs != self.phab_vcs:
+            if not self.is_cinnabar_installed:
                 raise Error(
                     "Git Cinnabar extension is required to work on this repository."
                 )
-
-        return phab_vcs
 
 
 #
@@ -4061,6 +4071,21 @@ def submit(repo, args):
     if DEBUG:
         ARC.append("--trace")
 
+    if args.no_arc and IS_WINDOWS:
+        raise Error("--no-arc is temporarily switched off for Windows.")
+
+    with wait_message("Checking connection to Phabricator."):
+        # Check if raw Conduit API can be used
+        if not conduit.check():
+            raise Error("Failed to use Conduit API")
+
+        # Check if local and remote VC matches
+        conduit.repo.check_vcs()
+
+        # Check if arc is configured
+        if not args.no_arc and not repo.check_arc():
+            raise Error("Failed to run %s." % ARC_COMMAND)
+
     repo.before_submit()
 
     # Find and preview commits to submits.
@@ -4082,14 +4107,6 @@ def submit(repo, args):
         morph_blocking_reviewers(commits)
         augment_commits_from_body(commits)
         update_commits_from_args(commits, args)
-
-        # Check if raw Conduit API can be used
-        if not conduit.check():
-            raise Error("Failed to use Conduit API")
-
-        # Check if arc is configured
-        if not args.no_arc and not repo.check_arc():
-            raise Error("Failed to run %s." % ARC_COMMAND)
 
     # Validate commit stack is suitable for review.
     show_commit_stack(commits, validate=True, ignore_reviewers=args.wip)
@@ -4500,8 +4517,10 @@ def patch(repo, args):
     * Error if base commit not found in repository
     """
     # Check if raw Conduit API can be used
-    if not conduit.check():
-        raise Error("Failed to use Conduit API")
+    with wait_message("Checking connection to Phabricator."):
+        # Check if raw Conduit API can be used
+        if not conduit.check():
+            raise Error("Failed to use Conduit API")
 
     # Look for any uncommited changes
     if not args.raw:
@@ -4660,6 +4679,7 @@ def patch(repo, args):
             logger.info(raw)
 
         else:
+            repo.check_vcs()
             diff_commits = diff["attachments"]["commits"]["commits"]
             author = "%s <%s>" % (
                 diff_commits[0]["author"]["name"],
@@ -4943,6 +4963,11 @@ def parse_args(argv):
         dest="safe_mode",
         action="store_true",
         help="Run VCS with only necessary extensions.",
+    )
+    patch_parser.add_argument(
+        "--force-vcs",
+        action="store_true",
+        help="EXPERIMENTAL: Override VCS compatibility check.",
     )
     patch_parser.set_defaults(func=patch, needs_repo=True, no_arc=True)
 
