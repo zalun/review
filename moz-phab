@@ -657,6 +657,49 @@ class Config(object):
 #
 
 
+def to_llist(revisions):
+    llist = {}
+    for i, revision in enumerate(revisions):
+        child = revisions[i + 1] if i + 1 < len(revisions) else None
+        llist[revision] = child
+    return llist
+
+
+def walk_llist(llist, allow_multiple_heads=False):
+    """Parse the llist for multiple heads and return a unique list of elements.
+
+    Parameters:
+        llist (dict): A linked list. {A_id: B_id, B_id: None}
+        allow_multiple_heads (bool): Fail if multiple heads found.
+    """
+    referenced_children = [r for r in llist.values() if r]
+
+    # Find head
+    node = None
+    for n in sorted(llist.keys()):
+        if n not in referenced_children:
+            if node:
+                if not allow_multiple_heads:
+                    raise Error("Multiple heads found in: %s" % llist)
+                break
+            node = n
+    if not node:
+        raise Error("Failed to find head in: %s" % llist)
+
+    # Walk list, checking for loops
+    nodes = []
+    while node:
+        nodes.append(node)
+
+        child = llist[node]
+        if child and child in nodes:
+            raise Error("Dependency loop in: %s" % llist)
+
+        node = child
+
+    return nodes
+
+
 class ConduitAPI:
     def __init__(self):
         self.repo = None
@@ -774,6 +817,23 @@ class ConduitAPI:
             return True
 
         return False
+
+    def phid_to_id(self, phid):
+        """Convert phid to id.
+
+        Paramteres:
+            phid (string/list): A string or a list of PHID
+
+        Returns:
+            id or a list of ids in Phabricator.
+        """
+        return_str = isinstance(phid, str)
+        phids = [phid] if return_str else phid
+        ids = ["D{}".format(r["id"]) for r in self.get_revisions(phids=phids)]
+        if return_str:
+            return ids[0]
+
+        return ids
 
     def get_revisions(self, ids=None, phids=None):
         """Get revisions info from Phabricator.
@@ -900,6 +960,44 @@ class ConduitAPI:
             for r in revisions
             if r["fields"]["status"]["value"] != "abandoned"
         ]
+
+    def get_stack(self, rev_ids):
+        """Returns a dict of PHIDs."""
+        phids = set()
+        if not rev_ids:
+            return {}
+        revisions = self.get_revisions(ids=rev_ids)
+        new_phids = set([rev["phid"] for rev in revisions])
+        stack = {}
+
+        while new_phids:
+            phids.update(new_phids)
+
+            edges = self.call(
+                "edge.search",
+                dict(
+                    sourcePHIDs=list(new_phids),
+                    types=["revision.parent", "revision.child"],
+                    limit=10000,
+                ),
+            )["data"]
+
+            new_phids = set()
+            for edge in edges:
+                new_phids.add(edge["sourcePHID"])
+                new_phids.add(edge["destinationPHID"])
+
+                if edge["edgeType"] == "revision.child":
+                    assert edge["sourcePHID"] not in stack
+                    stack[edge["sourcePHID"]] = edge["destinationPHID"]
+
+            new_phids = new_phids - phids
+
+        for child in list(stack.values()):
+            # set the last child (not a parent)
+            stack.setdefault(child)
+
+        return stack
 
     def get_users(self, usernames):
         """Get users using the user.query API.
@@ -4080,6 +4178,131 @@ def update_revision_reviewers(transactions, commit):
     transactions.extend([dict(type="reviewers.set", value=all_reviewing_phid)])
 
 
+def stack_transactions(remote_phids, local_phids):
+    remote_list = to_llist(remote_phids)
+    local_list = to_llist(local_phids)
+
+    transactions = {}
+    for revision in remote_phids + local_phids:
+        transactions[revision] = []
+
+    # remote no longer in stack
+    for revision in [r for r in remote_phids if r not in local_phids]:
+        # transactions.append("%s: set-child %s" % (revision, None))
+        transactions[revision].append(("children.set", None))
+        remote_list[revision] = None
+        walk_llist(remote_list, allow_multiple_heads=True)
+
+    # new revisions
+    for revision in [r for r in local_phids if r not in remote_phids]:
+        child = local_list[revision]
+        # transactions.append("%s: set-child %s" % (revision, child))
+        transactions[revision].append(("children.set", child))
+        remote_list[revision] = child
+        walk_llist(remote_list, allow_multiple_heads=True)
+
+    for revision in [r for r in remote_phids if r in local_phids]:
+        if local_list[revision] != remote_list[revision]:
+            # transactions.append("%s: set-child %s" % (revision, local_list[revision]))
+            transactions[revision].append(("children.set", local_list[revision]))
+            remote_list[revision] = local_list[revision]
+            walk_llist(remote_list, allow_multiple_heads=True)
+
+    # for revision in set(remote_revisions) - set(local_revisions):
+    for revision in [r for r in remote_phids if r not in local_phids]:
+        # transactions.append("%s: abandon" % revision)
+        transactions[revision].append(("abandon", True))
+        del remote_list[revision]
+        walk_llist(remote_list, allow_multiple_heads=True)
+
+    assert ":".join(walk_llist(remote_list)) == ":".join(walk_llist(local_list))
+
+    conduit_transactions = {}
+    for revision, transaction_list in transactions.items():
+        if not transaction_list:
+            continue
+        conduit_transactions.setdefault(revision, [])
+        for transaction in transaction_list:
+            k, v = transaction
+            if k == "children.set" and v:
+                v = v
+            conduit_transactions[revision].append({"type": k, "value": v})
+
+    return conduit_transactions
+
+
+def prepare_transactions(remote_phids, local_phids):
+    remote_list = to_llist(remote_phids)
+    local_list = to_llist(local_phids)
+
+    transactions = {"children.set": [], "abandon": []}
+
+    # remote no longer in stack
+    for revision in [r for r in remote_phids if r not in local_phids]:
+        # transactions.append("%s: set-child %s" % (revision, None))
+        transactions["children.set"].append((revision, None))
+        remote_list[revision] = None
+        walk_llist(remote_list, allow_multiple_heads=True)
+
+    # new revisions
+    for revision in [r for r in local_phids if r not in remote_phids]:
+        child = local_list[revision]
+        # transactions.append("%s: set-child %s" % (revision, child))
+        transactions["children.set"].append((revision, child))
+        remote_list[revision] = child
+        walk_llist(remote_list, allow_multiple_heads=True)
+
+    for revision in [r for r in remote_phids if r in local_phids]:
+        if local_list[revision] != remote_list[revision]:
+            # transactions.append("%s: set-child %s" % (revision, local_list[revision]))
+            transactions["children.set"].append((revision, local_list[revision]))
+            remote_list[revision] = local_list[revision]
+            walk_llist(remote_list, allow_multiple_heads=True)
+
+    # for revision in set(remote_revisions) - set(local_revisions):
+    for revision in [r for r in remote_phids if r not in local_phids]:
+        # transactions.append("%s: abandon" % revision)
+        transactions["abandon"].append(revision)
+        del remote_list[revision]
+        walk_llist(remote_list, allow_multiple_heads=True)
+
+    assert ":".join(walk_llist(remote_list)) == ":".join(walk_llist(local_list))
+
+    if not transactions["children.set"]:
+        del transactions["children.set"]
+
+    if not transactions["abandon"]:
+        del transactions["abandon"]
+
+    return transactions
+
+
+def prepare_reorg(phab_stack_phids, commits):
+    """Finds changes in Phabricator stack defined in the order of commits.
+
+    Parameters:
+        phab_stack_phids (list): A list of Phabricator stack PHIDs
+        commits (list): A list of commits to submit.
+
+    Returns:
+        A dict defining the reorg.
+        {
+            "abandon": ["PHID-3"],
+            "chldren.set": [
+                ("PHID-3", None),  # remove child from PHID-1
+                ("PHID-1", "2"),  # New revision (commits[2]) will become a child of PHID-1
+                ("2", "PHID-2"),  # PHID-2 will become a child of New revision (commits[2])
+            ]
+        }
+    """
+    if not phab_stack_phids:
+        return None
+
+    # Use index of the commit in commits table to identify new revisions
+    local_phids = [c["rev-phid"] or str(i) for i, c in enumerate(commits)]
+    return prepare_transactions(phab_stack_phids, local_phids)
+
+
 def submit(repo, args):
     if DEBUG:
         ARC.append("--trace")
@@ -4149,7 +4372,102 @@ def submit(repo, args):
             "be result in a comment on new revisions."
         )
 
+    rev_ids_to_update = [int(c["rev-id"]) for c in commits if c.get("rev-id")]
+    list_to_update = None
+    if args.reorg:
+        # XXX
+        # Reorganizing requires commits to be a representation of the entire stack in
+        # Phabricator. Otherwise it would abandon revisions.
+
+        # REORG Get PhabricatorStack
+        # Errors will be raised in the `walk_llist` method
+        with wait_message("Loading the remote stack order..."):
+            phab_stack = conduit.get_stack(
+                [c["rev-id"] for c in commits if c["rev-id"]]
+            )
+
+        # {A_as_parent: B_as_child, B_as_parent: C_as_child, C_as_parent: None}
+
+        phab_stack_phids = walk_llist(phab_stack)
+        # Preload all revisions from the local and remote stack with one call to API
+        conduit.get_revisions(phids=phab_stack_phids)
+        # Assign PHID to commits.
+        if rev_ids_to_update:
+            with wait_message("Loading revision data..."):
+                list_to_update = conduit.get_revisions(ids=rev_ids_to_update)
+
+        for commit in commits:
+            commit["rev-phid"] = (
+                cache.get("rev-id-{}".format(commit["rev-id"]))
+                if commit["rev-id"]
+                else None
+            )
+
+        # REORG Prepare for transactions
+        reorg_changes = prepare_reorg(phab_stack_phids, commits)
+        if reorg_changes:
+            abandon_phids = reorg_changes.get("abandon", [])
+            abandon = conduit.phid_to_id(abandon_phids)
+            modify = []
+            for parent, child in reorg_changes.get("children.set", []):
+                if child is not None:
+                    modify.append(
+                        "{child} will become the child of {parent}".format(
+                            child=conduit.phid_to_id(child)
+                            if child.startswith("PHID")
+                            else "New revision",
+                            parent=conduit.phid_to_id(parent)
+                            if parent.startswith("PHID")
+                            else "New revision",
+                        )
+                    )
+                elif parent not in abandon_phids and parent.startswith("PHID"):
+                    modify.append(
+                        "Child will be removed from {}".format(
+                            conduit.phid_to_id(parent)
+                        )
+                    )
+
+            if abandon:
+                logger.warning(
+                    "Following revisions will be removed: {}".format(", ".join(abandon))
+                )
+
+            if modify:
+                for m in modify:
+                    logger.warning(m)
+
+        # This is comparing existing commits to the phabstack also commits outside of the stack to submit
+        # This will take the new commits as well and place them in the mix
+        # [
+        # DISPLAY WARNING
+        #    [phid, node, child_phid, child_node, phab_id, child_phab_id], update with change of the order
+        #    [None, node, child_phid, child_node, phab_id, child_phab_id], create new revision inside
+        #    [phid, None, None, None, None], abandon revision
+        # NO WARNING
+        #    [None, node, None, child_node, None], ...], create new revision with a child
+        #    [phid, node, None, None, phab_id, None], child will be removed - warning will come from abandon
+
+        # prepare_reorg = prepare_reorg(phab_stack, commits)
+        # perform_reorg = all(
+        # [
+        # ((t[0] is not None and t[1] is None) or (t[2] is not None))
+        # for t in prepare_transactions
+        # ]
+        # )
+        # if perform_reorg:
+        # for t in prepare_transactions:
+        # if t[0] is not None and t[1] is None:
+        # logger.warning("Revision {} will be abandoned".format(t[4]))
+        # elif t[2] is not None:
+        # logger.warning(
+        # "Revision {child_id} will become a child of {id}".format(
+        # child_id=t[5], id=t[6] or "new revision"
+        # )
+        # )
+
     # Confirmation prompt.
+    prepare_reordering = []
     if args.yes:
         pass
     elif config.auto_submit and not args.interactive:
@@ -4170,11 +4488,12 @@ def submit(repo, args):
     # Process.
     previous_commit = None
     # Collect all existing revisions to get reviewers info.
-    rev_ids_to_update = [int(c["rev-id"]) for c in commits if c.get("rev-id")]
     revisions_to_update = None
     if rev_ids_to_update:
-        with wait_message("Loading revision data..."):
-            list_to_update = conduit.get_revisions(ids=rev_ids_to_update)
+        if list_to_update is None:
+            # This list would be loaded if --reorganise
+            with wait_message("Loading revision data..."):
+                list_to_update = conduit.get_revisions(ids=rev_ids_to_update)
 
         revisions_to_update = {str(r["id"]): r for r in list_to_update}
 
@@ -4298,6 +4617,8 @@ def submit(repo, args):
             if not revision_url:
                 raise Error("Failed to find 'Revision URL' in arc output")
 
+            # REORG Compare with existing commits (also away from the stack)
+            # REORG Create transactions
             if is_update:
                 current_status = revision_to_update["fields"]["status"]["value"]
                 with wait_message("Updating D%s.." % commit["rev-id"]):
@@ -4898,6 +5219,12 @@ def parse_args(argv):
         dest="safe_mode",
         action="store_true",
         help="Run VCS with only necessary extensions.",
+    )
+    submit_parser.add_argument(
+        "--reorganise",
+        dest="reorg",
+        action="store_true",
+        help="Reorganise the stack of revisions in Phabricator.",
     )
     submit_parser.add_argument(
         "start_rev",

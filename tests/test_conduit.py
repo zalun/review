@@ -241,6 +241,18 @@ def test_get_revisions_search_by_revids_missing(get_revs, m_call):
     ]
 
 
+@mock.patch("mozphab.ConduitAPI.get_revisions")
+def test_phid_to_id_list_or_str(m_get):
+    m_get.return_value = [{"id": 123}]
+
+    assert mozphab.conduit.phid_to_id("ABC") == "D123"
+    m_get.assert_called_once_with(phids=["ABC"])
+
+    m_get.reset_mock()
+    assert mozphab.conduit.phid_to_id(["A", "B"]) == ["D123"]
+    m_get.assert_called_once_with(phids=["A", "B"])
+
+
 @mock.patch("mozphab.ConduitAPI.call")
 def test_get_diffs(m_call):
     conduit = mozphab.conduit
@@ -437,3 +449,140 @@ def test_diff_property(m_call, git, hg):
             ),
         },
     )
+
+
+def test_get_stack_empty():
+    assert mozphab.conduit.get_stack(None) == {}
+
+
+@mock.patch("mozphab.ConduitAPI.call")
+@mock.patch("mozphab.ConduitAPI.get_revisions")
+def test_get_stack(m_get_revs, m_call):
+    get_stack = mozphab.conduit.get_stack
+    m_get_revs.return_value = [dict(phid="PHID-DREV-1")]
+
+    # No edeg returned
+    m_call.return_value = dict(data={})
+    assert get_stack([123]) == {}
+    print(m_call.call_args_list)
+    m_call.assert_called_once_with(
+        "edge.search",
+        dict(
+            sourcePHIDs=["PHID-DREV-1"],
+            limit=10000,
+            types=["revision.parent", "revision.child"],
+        ),
+    )
+
+    # Arg is a parent
+    m_call.reset_mock()
+    m_call.side_effect = [
+        dict(
+            data=[
+                dict(
+                    edgeType="revision.child",
+                    sourcePHID="PHID-DREV-1",
+                    destinationPHID="PHID-DREV-2",
+                ),
+                dict(
+                    edgeType="revision.parent",
+                    sourcePHID="PHID-DREV-2",
+                    destinationPHID="PHID-DREV-1",
+                ),
+            ]
+        ),
+        dict(data={}),
+    ]
+    assert get_stack([123]) == {"PHID-DREV-1": "PHID-DREV-2", "PHID-DREV-2": None}
+    assert m_call.call_count == 2
+
+    # Arg is a child
+    m_call.reset_mock()
+    m_call.side_effect = [
+        dict(
+            data=[
+                dict(
+                    edgeType="revision.child",
+                    sourcePHID="PHID-DREV-2",
+                    destinationPHID="PHID-DREV-1",
+                ),
+                dict(
+                    edgeType="revision.parent",
+                    sourcePHID="PHID-DREV-1",
+                    destinationPHID="PHID-DREV-2",
+                ),
+            ]
+        ),
+        dict(data={}),
+    ]
+    assert get_stack([123]) == {"PHID-DREV-2": "PHID-DREV-1", "PHID-DREV-1": None}
+    assert m_call.call_count == 2
+
+    # Arg has two parents
+    m_call.reset_mock()
+    m_call.side_effect = [
+        dict(
+            data=[
+                dict(
+                    edgeType="revision.child",
+                    sourcePHID="PHID-DREV-2",
+                    destinationPHID="PHID-DREV-1",
+                ),
+                dict(
+                    edgeType="revision.parent",
+                    sourcePHID="PHID-DREV-1",
+                    destinationPHID="PHID-DREV-2",
+                ),
+                dict(
+                    edgeType="revision.child",
+                    sourcePHID="PHID-DREV-3",
+                    destinationPHID="PHID-DREV-1",
+                ),
+                dict(
+                    edgeType="revision.parent",
+                    sourcePHID="PHID-DREV-1",
+                    destinationPHID="PHID-DREV-3",
+                ),
+            ]
+        ),
+        dict(data={}),
+    ]
+    assert get_stack([123]) == {
+        "PHID-DREV-2": "PHID-DREV-1",
+        "PHID-DREV-3": "PHID-DREV-1",
+        "PHID-DREV-1": None,
+    }
+    assert m_call.call_count == 2
+
+    # Arg has two children
+    m_call.reset_mock()
+    m_call.side_effect = [
+        dict(
+            data=[
+                dict(
+                    edgeType="revision.child",
+                    sourcePHID="PHID-DREV-1",
+                    destinationPHID="PHID-DREV-2",
+                ),
+                dict(
+                    edgeType="revision.parent",
+                    sourcePHID="PHID-DREV-2",
+                    destinationPHID="PHID-DREV-1",
+                ),
+                dict(
+                    edgeType="revision.child",
+                    sourcePHID="PHID-DREV-1",
+                    destinationPHID="PHID-DREV-3",
+                ),
+                dict(
+                    edgeType="revision.parent",
+                    sourcePHID="PHID-DREV-3",
+                    destinationPHID="PHID-DREV-1",
+                ),
+            ]
+        ),
+    ]
+    with pytest.raises(AssertionError):
+        get_stack([123])
+
+    m_call.assert_called_once()

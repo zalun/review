@@ -342,7 +342,8 @@ def test_api_call_with_error_raises_exception(arc_out):
 
     with pytest.raises(mozphab.ConduitAPIError) as err:
         mozphab.arc_call_conduit("my.method", {}, "")
-        assert err.message == "**sad trombone**"
+
+    # assert err.message == "**sad trombone**"
 
 
 @mock.patch("mozphab.arc_out")
@@ -570,3 +571,38 @@ def test_short_node():
     assert mozphab.short_node("b016b6080ff9") == "b016b6080ff9"
     assert mozphab.short_node("b016b60") == "b016b60"
     assert mozphab.short_node("mozilla-central") == "mozilla-central"
+
+
+def test_walk_llist():
+    walk = mozphab.walk_llist
+    with pytest.raises(mozphab.Error) as e:
+        walk({})
+
+    assert str(e.value).startswith("Failed to find head")
+
+    assert walk(dict(A=None)) == ["A"]
+
+    assert walk(dict(A="B", B=None)) == ["A", "B"]
+
+    with pytest.raises(mozphab.Error) as e:
+        walk(dict(A="B", C=None))
+
+    assert str(e.value).startswith("Multiple heads")
+
+    assert walk(dict(A="B", B=None, C=None), allow_multiple_heads=True) == ["A", "B"]
+    assert walk(dict(A="B", B=None, C="D", D=None), allow_multiple_heads=True) == [
+        "A",
+        "B",
+    ]
+    assert walk(dict(A="B", B=None, C="B"), allow_multiple_heads=True) == ["A", "B"]
+    assert walk(dict(C="B", B=None, A="B"), allow_multiple_heads=True) == ["A", "B"]
+
+    with pytest.raises(mozphab.Error) as e:
+        walk(dict(A="B", B="A"))
+
+    assert str(e.value).startswith("Failed to find head")
+
+    with pytest.raises(mozphab.Error) as e:
+        walk(dict(A="B", B="C", C="B"))
+
+    assert str(e.value).startswith("Dependency loop")
