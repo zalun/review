@@ -179,6 +179,82 @@ Differential Revision: http://example.test/D123
     )
 
 
+def test_submit_create_detached(in_process, git_repo_path, git_sha, init_sha):
+    call_conduit.side_effect = (
+        # ping
+        dict(),
+        # diffusion.repository.search
+        dict(data=[dict(phid="PHID-REPO-1", fields=dict(vcs="git"))]),
+        # user search
+        [dict(userName="alice", phid="PHID-USER-1")],
+        # differential.creatediff
+        dict(dict(phid="PHID-DIFF-1", diffid="1")),
+        # differential.setdiffproperty
+        dict(),
+        # differential.revision.edit
+        dict(object=dict(id="123")),
+    )
+    (git_repo_path / "X").write_text("a\r\nb\nc\n")
+    git_out("add", ".")
+    (git_repo_path / "msg").write_text("A r?alice")
+    git_out("checkout", git_sha())
+    git_out("commit", "--file", "msg")
+    (git_repo_path / "untracked").write_text("a\n")
+
+    mozphab.main(["submit", "--yes", "--bug", "1", init_sha], is_development=True)
+
+    log = git_out("log", "--format=%s%n%n%b", "-1")
+    expected = """
+Bug 1 - A r?alice
+
+Differential Revision: http://example.test/D123
+"""
+    assert log.strip() == expected.strip()
+
+
+def test_submit_create_stack_detached(in_process, git_repo_path, git_sha, init_sha):
+    call_conduit.side_effect = (
+        # ping
+        dict(),
+        # diffusion.repository.search
+        dict(data=[dict(phid="PHID-REPO-1", fields=dict(vcs="git"))]),
+        # user search
+        [dict(userName="alice", phid="PHID-USER-1")],
+        # differential.creatediff
+        dict(dict(phid="PHID-DIFF-1", diffid="1")),
+        # differential.setdiffproperty
+        dict(),
+        # differential.revision.edit
+        dict(object=dict(id="123")),
+        # differential.creatediff
+        dict(dict(phid="PHID-DIFF-2", diffid="2")),
+        # differential.setdiffproperty
+        dict(),
+        # differential.revision.edit
+        dict(object=dict(id="124")),
+    )
+    git_out("checkout", init_sha)
+    (git_repo_path / "X").write_text("A\n")
+    git_out("add", ".")
+    git_out("commit", "-am", "A r?alice")
+    (git_repo_path / "X").write_text("B\n")
+    git_out("commit", "-am", "B r?alice")
+    (git_repo_path / "untracked").write_text("a\n")
+
+    mozphab.main(["submit", "--yes", "--bug", "1", init_sha], is_development=True)
+
+    log = git_out("log", "--format=%s%n%n%b", "-2")
+    expected = """
+Bug 1 - B r?alice
+
+Differential Revision: http://example.test/D124
+Bug 1 - A r?alice
+
+Differential Revision: http://example.test/D123
+"""
+    assert log.strip() == expected.strip()
+
+
 def test_submit_create_no_bug(in_process, git_repo_path, init_sha):
     call_conduit.reset_mock()
     call_conduit.side_effect = (

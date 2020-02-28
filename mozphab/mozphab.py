@@ -2845,6 +2845,7 @@ class Git(Repository):
         self.vcs = "git"
         self.revset = None
         self.branch = None
+        self._is_detached_head = None
 
     @property
     def is_cinnabar_installed(self):
@@ -2887,15 +2888,8 @@ class Git(Repository):
         )
 
     def before_submit(self):
-        # Store current branch (fails if HEAD in detached state)
-        try:
-            self.branch = self._get_current_head()
-        except Exception:
-            raise Error(
-                "Git failed to read the branch name.\n"
-                "The repository is in a detached HEAD state.\n"
-                "You need to run the *git checkout <branch-name>* command."
-            )
+        # Store current state (branch name or sha1)
+        self.branch = self._get_current_head()
 
     @classmethod
     def is_repo(cls, path):
@@ -2923,11 +2917,15 @@ class Git(Repository):
         for commit in commits:
             if commit["node"] == commit["orig-node"]:
                 continue
+
+            if self.is_detached_head and commit["orig-node"] == self.branch:
+                self.branch = commit["node"]
+
             branches = self.git_out(["branch", "--contains", commit["orig-node"]])
             for branch in branches:
                 if branch.startswith("* ("):
-                    # Omit `* (detached from {SHA1})`
-                    continue
+                    # Detached HEAD
+                    branch = "detached-{}".format(uuid.uuid4().hex)
 
                 branch = branch.lstrip("* ")
                 # Rebase the branch to the last commit from the stack .
@@ -2940,7 +2938,9 @@ class Git(Repository):
         branches_to_rebase = self._find_branches_to_rebase(commits)
 
         for branch, nodes in branches_to_rebase.items():
-            self.checkout(branch)
+            if not branch.startswith("detached"):
+                self.checkout(branch)
+
             self._rebase(*nodes)
 
         self.checkout(self.branch)
@@ -3290,7 +3290,23 @@ class Git(Repository):
 
         self.commit(body, author, author_date)
 
+    @property
+    def is_detached_head(self):
+        if self._is_detached_head is None:
+            self._is_detached_head = "->" not in self.git_out(
+                ["log", "-n", "1", "--pretty=%d", "HEAD"], split=False
+            )
+        return self._is_detached_head
+
     def _get_current_head(self):
+        """Return current branch or sha1."""
+        if self.is_detached_head:
+            logger.warning("The repository is in a detached HEAD state.")
+            return self._get_current_hash()
+
+        return self._get_current_branch()
+
+    def _get_current_branch(self):
         """Return current's HEAD symbolic link."""
         symbolic = self.git_out(["symbolic-ref", "HEAD"], split=False)
         return symbolic.split("refs/heads/")[1]
@@ -3384,8 +3400,8 @@ class Git(Repository):
     def rebase_commit(self, source_commit, dest_commit):
         self._rebase(dest_commit["node"], source_commit["node"])
 
-    def _rebase(self, newbase, upstream):
-        self.git_call(["rebase", "--quiet", "--onto", newbase, upstream])
+    def _rebase(self, newbase, oldbase):
+        self.git_call(["rebase", "--quiet", "--onto", newbase, oldbase])
 
     def _file_size(self, blob):
         return int(self.git_out(["cat-file", "-s", blob], split=False))
