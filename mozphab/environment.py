@@ -5,6 +5,8 @@
 import os
 import sys
 
+from pathlib import Path
+
 DEBUG = bool(os.getenv("DEBUG"))
 HTTP_ALLOWED = bool(os.getenv("HTTP_ALLOWED"))
 IS_WINDOWS = sys.platform == "win32"
@@ -28,6 +30,8 @@ DEFAULT_START_REV = "(auto)"
 DEFAULT_END_REV = "."
 
 HOME_DIR = os.path.expanduser("~")
+
+MOZPHAB_MAIN_DIR = Path(__file__).resolve().parent.parent
 
 # ~/.mozbuild/moz-phab
 MOZBUILD_PATH = os.path.join(

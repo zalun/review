@@ -19,5 +19,10 @@ setup(
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     python_requires=">=3.5",
-    install_requires=["sentry-sdk", "setuptools"],
+    install_requires=[
+        "distro",
+        "glean-sdk>=30.1.0",
+        "sentry-sdk>=0.14.3",
+        "setuptools",
+    ],
 )
