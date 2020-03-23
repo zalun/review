@@ -66,6 +66,7 @@ class Mercurial(Repository):
         if not m:
             raise Error("Failed to determine Mercurial version.")
         self.mercurial_version = LooseVersion(m.group(1))
+        self.vcs_version = str(self.mercurial_version)
         if self.mercurial_version < MINIMUM_MERCURIAL_VERSION:
             raise Error(
                 "You are currently running Mercurial %s.  "

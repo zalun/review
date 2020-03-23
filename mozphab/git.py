@@ -44,6 +44,11 @@ class Git(Repository):
         super().__init__(path, dot_path)
 
         self.vcs = "git"
+        m = re.search(r"\d+\.\d+\.\d+", self.git.output(["--version"], split=False))
+        if not m:
+            raise Error("Failed to determine Git version.")
+
+        self.vcs_version = m.group(0)
         self.revset = None
         self.branch = None
 

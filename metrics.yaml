@@ -1,0 +1,192 @@
+---
+$schema: moz://mozilla.org/schemas/glean/metrics/1-0-0
+
+mozphab.environment:
+  distribution_version:
+    type: string
+    description: >
+        Version number of the Operating System or distribution name and version
+        for Linux.
+    notification_emails:
+      - mozphab-telemetry@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025#c2
+    expires: never
+    send_in_pings:
+      - usage
+  python_version:
+    type: string
+    description: >
+        Python version
+    notification_emails:
+      - mozphab-telemetry@mozilla.com
+      - pzalewa@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025#c2
+    expires: never
+    send_in_pings:
+      - usage
+
+mozphab.environment.vcs:
+  name:
+    type: string
+    description: >
+        Name of the underlying version control system
+    notification_emails:
+      - mozphab-telemetry@mozilla.com
+      - pzalewa@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025#c2
+    expires: never
+    send_in_pings:
+      - usage
+
+  version:
+    type: string
+    description: >
+        Version of the underlying version control system
+    notification_emails:
+      - mozphab-telemetry@mozilla.com
+      - pzalewa@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025#c2
+    expires: never
+    send_in_pings:
+      - usage
+
+mozphab.user:
+  installation:
+    type: uuid
+    description: >
+        Unique identifier of each MozPhab installation.
+        A user might install the application on multiple machines/profiles.
+    lifetime: user
+    notification_emails:
+      - mozphab-telemetry@mozilla.com
+      - pzalewa@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025#c2
+    expires: never
+    send_in_pings:
+      - usage
+
+  id:
+    type: uuid
+    description: >
+        Unique identifier of each MozPhab user.
+    lifetime: user
+    notification_emails:
+      - mozphab-telemetry@mozilla.com
+      - pzalewa@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025#c2
+    expires: never
+    send_in_pings:
+      - usage
+
+mozphab.usage:
+  duration:
+    type: timespan
+    description: >
+        Time spent on performing an ordered command
+    time_unit: millisecond
+    notification_emails:
+      - mozphab-telemetry@mozilla.com
+      - pzalewa@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025#c2
+    expires: never
+    send_in_pings:
+      - usage
+
+  command:
+    type: string
+    description: >
+        Command used to run MozPhab, e.g. `submit` or `patch`.
+    notification_emails:
+      - mozphab-telemetry@mozilla.com
+      - pzalewa@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025#c2
+    expires: never
+    send_in_pings:
+      - usage
+
+  override_switch:
+    type: boolean
+    description: >
+        True if a --force switch was used to override validation
+    notification_emails:
+      - mozphab-telemetry@mozilla.com
+      - pzalewa@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025#c2
+    expires: never
+    send_in_pings:
+      - usage
+
+mozphab.submission:
+  preparation:
+    type: timespan
+    description: >
+        Time spent on preparing the commit stack.
+    time_unit: millisecond
+    notification_emails:
+      - mozphab-telemetry@mozilla.com
+      - pzalewa@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025#c2
+    expires: never
+    send_in_pings:
+      - usage
+
+  process:
+    type: timespan
+    description: >
+        Time spent on performing the submission.
+    time_unit: millisecond
+    notification_emails:
+      - mozphab-telemetry@mozilla.com
+      - pzalewa@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025#c2
+    expires: never
+    send_in_pings:
+      - usage
+
+  commits_number:
+    type: counter
+    description: >
+        Amount of commits in the stack.
+    notification_emails:
+      - mozphab-telemetry@mozilla.com
+      - pzalewa@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1621025#c2
+    expires: never
+    send_in_pings:
+      - usage

@@ -24,6 +24,7 @@ from .exceptions import Error
 from .logger import init_logging, logger
 from .spinner import wait_message
 from .sentry import init_sentry, report_to_sentry
+from .telemetry import telemetry
 from .updater import check_for_updates, get_name_and_version
 
 # Known Issues
@@ -63,11 +64,17 @@ def main(argv, *, is_development):
         if args.command != "self-update":
             check_for_updates(with_arc=with_arc)
 
+        repo = None
         if args.needs_repo:
             with wait_message("Starting up.."):
                 repo = repo_from_args(args)
 
             conduit.set_repo(repo)
+
+        telemetry.set_metrics(args, is_development=is_development)
+
+        if repo is not None:
+            telemetry.set_vcs(repo)
             try:
                 args.func(repo, args)
             finally:
@@ -75,6 +82,9 @@ def main(argv, *, is_development):
 
         else:
             args.func(args)
+
+        telemetry.metrics.mozphab.usage.duration.stop()
+        telemetry.submit()
 
     except KeyboardInterrupt:
         pass
