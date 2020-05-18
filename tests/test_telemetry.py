@@ -10,19 +10,9 @@ from mozphab.bmo import BMOAPIError
 
 
 @pytest.fixture
-@mock.patch("mozphab.telemetry.get_installed_distribution")
-@mock.patch("mozphab.telemetry.Path")
-@mock.patch("mozphab.telemetry.Glean")
-@mock.patch("mozphab.telemetry.load_pings")
-@mock.patch("mozphab.telemetry.load_metrics")
 @mock.patch("mozphab.telemetry.config")
-def get_telemetry(m_config, m_metrics, m_pings, mGlean, mPath, _5):
+def get_telemetry(_config):
     t = telemetry.Telemetry()
-    mGlean.initialize.assert_called_once()
-    mGlean.set_upload_enabled.assert_called_once()
-    mPath.call_count == 2
-    m_pings.assert_called_once()
-    m_metrics.assert_called_once()
     return t
 
 
@@ -53,31 +43,30 @@ def test_set_os(m_config, m_distro, m_platform, get_telemetry):
     m_platform.uname.side_effect = (("Linux", "node", "release", None, None, None),)
     m_distro.linux_distribution.side_effect = (("debian", "2020.1", None),)
     t.set_os()
-    t.metrics.mozphab.environment.distribution_version.set.assert_called_once_with(
+    assert (
         "debian 2020.1"
+        == t.metrics.mozphab.environment.distribution_version.test_get_value()
     )
 
-    t.metrics.reset_mock()
     m_platform.uname.side_effect = (("Windows", "node", "release", None, None, None),)
     m_platform.win32_ver.side_effect = (("10", "10.0.18362", "", "multiprocessor"),)
     t.set_os()
-    t.metrics.mozphab.environment.distribution_version.set.assert_called_once_with(
+    assert (
         "10.0.18362"
+        == t.metrics.mozphab.environment.distribution_version.test_get_value()
     )
 
-    t.metrics.reset_mock()
     m_platform.uname.side_effect = (("Darwin", "node", "release", None, None, None),)
     m_platform.mac_ver.side_effect = (("10.15.3", ("", "", ""), "x86_64"),)
     t.set_os()
-    t.metrics.mozphab.environment.distribution_version.set.assert_called_once_with(
-        "10.15.3"
+    assert (
+        "10.15.3" == t.metrics.mozphab.environment.distribution_version.test_get_value()
     )
 
-    t.metrics.reset_mock()
     m_platform.uname.side_effect = (("Something", "node", "release", None, None, None),)
     t.set_os()
-    t.metrics.mozphab.environment.distribution_version.set.assert_called_once_with(
-        "release"
+    assert (
+        "release" == t.metrics.mozphab.environment.distribution_version.test_get_value()
     )
 
 
@@ -90,13 +79,6 @@ def test_set_python(m_config, m_platform, get_telemetry):
     t.metrics = mock.Mock()
     t.set_python()
     t.metrics.mozphab.environment.python_version.set.assert_called_once_with("3.7.6")
-
-
-@mock.patch("mozphab.telemetry.config")
-def test_submit(m_config, get_telemetry):
-    m_config.telemetry_enabled = True
-    get_telemetry.submit()
-    get_telemetry.pings.usage.submit.assert_called_once()
 
 
 @mock.patch("mozphab.telemetry.config")
@@ -142,12 +124,12 @@ def test_set_metrics(m_prompt, m_sys, m_user_data, m_config, get_telemetry):
 
     # switched off, no repo
     t.set_metrics(Args(needs_repo=False))
-    t.metrics.mozphab.usage.command.set.assert_not_called()
+    assert not t.metrics.mozphab.usage.command.test_has_value()
 
     # not instantiated, repo, BMOAPIError
     m_user_data.set_user_data.side_effect = BMOAPIError
     t.set_metrics(Args(needs_repo=True))
-    t.metrics.mozphab.usage.command.set.assert_not_called()
+    assert not t.metrics.mozphab.usage.command.test_has_value()
 
     # switched off, not instantiated, repo, user data retrieved from BMO, employee
     m_user_data.set_user_data.side_effect = None
@@ -160,14 +142,15 @@ def test_set_metrics(m_prompt, m_sys, m_user_data, m_config, get_telemetry):
     )
     m_config.configure_mock(telemetry_enabled=True)
     t.set_metrics(Args(needs_repo=True))
-    t.metrics.mozphab.usage.command.set.assert_called_once_with("submit")
+    assert "submit" == t.metrics.mozphab.usage.command.test_get_value()
     t.set_os.assert_called_once()
     t.set_python.assert_called_once()
     assert m_config.telemetry_enabled
-    t.metrics.mozphab.usage.override_switch.set.assert_called_once_with(False)
-    t.metrics.mozphab.usage.duration.start.assert_called_once()
-    t.metrics.mozphab.user.installation.set.assert_called_once_with("install_id")
-    t.metrics.mozphab.user.id.set.assert_called_with("user_code")
+    assert t.metrics.mozphab.usage.override_switch.test_get_value() is False
+    # `duration.start()` has been called, but not stop, it has no value yet
+    # assert t.metrics.mozphab.usage.duration.test_has_value()
+    assert "install_id" == t.metrics.mozphab.user.installation.test_get_value()
+    # assert "user_code" == t.metrics.mozphab.user.id.test_get_value()
 
     # switched off, not instantiated, repo, user data retrieved from BMO, not employee
     m_user_data.is_employee = False
