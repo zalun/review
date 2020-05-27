@@ -55,7 +55,7 @@ def test_submit_create(in_process, hg_repo_path):
     test_c.write_text("modified\n")
     hg_out("addremove")
     msgfile = hg_repo_path / "msg"
-    msgfile.write_text("Ą r?alice")
+    msgfile.write_text("Ą r?alice", encoding="utf-8")
     hg_out("commit", "-l", "msg")
     mozphab.main(["submit", "--yes", "--bug", "1", "."], is_development=True)
 
@@ -286,7 +286,7 @@ def test_submit_create_no_trailing_newline(in_process, hg_repo_path):
     test_c.write_text("modified")
     hg_out("addremove")
     msgfile = hg_repo_path / "msg"
-    msgfile.write_text("Ą r?alice")
+    msgfile.write_text("Ą r?alice", encoding="utf-8")
     hg_out("commit", "-l", "msg")
     mozphab.main(["submit", "--yes", "--bug", "1", "."], is_development=True)
 

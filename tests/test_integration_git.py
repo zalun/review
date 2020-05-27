@@ -38,11 +38,11 @@ def test_submit_create_arc(in_process, git_repo_path, init_sha):
         [{"userName": "alice", "phid": "PHID-USER-1"}],
     )
     testfile = git_repo_path / "X"
-    testfile.write_text("a")
+    testfile.write_text("a", encoding="utf-8")
     git_out("add", ".")
     git_out("commit", "--message", "A r?alice")
     testfile = git_repo_path / "untracked"
-    testfile.write_text("a")
+    testfile.write_text("a", encoding="utf-8")
 
     mozphab.main(
         ["submit", "--arc", "--yes", "--bug", "1", init_sha], is_development=True
@@ -72,12 +72,12 @@ def test_submit_create(in_process, git_repo_path, init_sha):
         # differential.revision.edit
         dict(object=dict(id="123")),
     )
-    (git_repo_path / "X").write_text("ą\r\nb\nc\n")
-    (git_repo_path / "Y").write_text("no line ending")
+    (git_repo_path / "X").write_text("ą\r\nb\nc\n", encoding="utf-8")
+    (git_repo_path / "Y").write_text("no line ending", encoding="utf-8")
     git_out("add", ".")
-    (git_repo_path / "msg").write_text("Ą r?alice")
+    (git_repo_path / "msg").write_text("Ą r?alice", encoding="utf-8")
     git_out("commit", "--file", "msg")
-    (git_repo_path / "untracked").write_text("a\n")
+    (git_repo_path / "untracked").write_text("a\n", encoding="utf-8")
 
     mozphab.main(["submit", "--yes", "--bug", "1", init_sha], is_development=True)
 
@@ -194,12 +194,12 @@ def test_submit_create_added_not_commited(in_process, git_repo_path, init_sha):
         # differential.revision.edit
         dict(object=dict(id="123")),
     )
-    (git_repo_path / "X").write_text("ą\r\nb\nc\n")
-    (git_repo_path / "Y").write_text("no line ending")
+    (git_repo_path / "X").write_text("ą\r\nb\nc\n", encoding="utf-8")
+    (git_repo_path / "Y").write_text("no line ending", encoding="utf-8")
     git_out("add", ".")
-    (git_repo_path / "msg").write_text("Ą r?alice")
+    (git_repo_path / "msg").write_text("Ą r?alice", encoding="utf-8")
     git_out("commit", "--file", "msg")
-    (git_repo_path / "untracked").write_text("a\n")
+    (git_repo_path / "untracked").write_text("a\n", encoding="utf-8")
     git_out("add", "untracked")
 
     with pytest.raises(exceptions.Error) as excinfo:
@@ -225,10 +225,10 @@ def test_submit_create_no_bug(in_process, git_repo_path, init_sha):
         dict(object=dict(id="123")),
     )
     testfile = git_repo_path / "X"
-    testfile.write_text("a\n")
+    testfile.write_text("a\n", encoding="utf-8")
     git_out("add", ".")
     msgfile = git_repo_path / "msg"
-    msgfile.write_text("A r?alice")
+    msgfile.write_text("A r?alice", encoding="utf-8")
     git_out("commit", "--file", "msg")
 
     mozphab.main(["submit", "--yes", "--no-bug", init_sha], is_development=True)
@@ -325,7 +325,7 @@ def test_submit_update(in_process, git_repo_path, init_sha):
         dict(object=dict(id="123")),
     )
     testfile = git_repo_path / "X"
-    testfile.write_text("ą")
+    testfile.write_text("ą", encoding="utf-8")
     git_out("add", ".")
     msgfile = git_repo_path / "msg"
     msgfile.write_text(
@@ -333,7 +333,8 @@ def test_submit_update(in_process, git_repo_path, init_sha):
 Bug 1 - Ą
 
 Differential Revision: http://example.test/D123
-"""
+""",
+        encoding="utf-8",
     )
     git_out("commit", "--file", "msg")
 
@@ -376,13 +377,13 @@ def test_submit_remove_cr(in_process, git_repo_path, init_sha):
         dict(object=dict(id="124")),
     )
     test_a = git_repo_path / "X"
-    test_a.write_text("a\r\nb\n")
+    test_a.write_text("a\r\nb\n", encoding="utf-8")
     git_out("add", "X")
     git_out("commit", "-am", "A r?alice")
     mozphab.main(["submit", "--yes", "--bug", "1", init_sha], is_development=True)
     call_conduit.reset_mock()
     # removing CR, leaving LF
-    test_a.write_text("a\nb\n")
+    test_a.write_text("a\nb\n", encoding="utf-8")
     git_out("commit", "-am", "B r?alice")
     mozphab.main(["submit", "--yes", "--bug", "1", "HEAD~"], is_development=True)
 
@@ -465,10 +466,10 @@ def test_submit_single_last(in_process, git_repo_path, init_sha):
         # differential.revision.edit
         dict(object=dict(id="123")),
     )
-    (git_repo_path / "X").write_text("a\n")
+    (git_repo_path / "X").write_text("a\n", encoding="utf-8")
     git_out("add", "X")
     git_out("commit", "-am", "A")
-    (git_repo_path / "X").write_text("b\n")
+    (git_repo_path / "X").write_text("b\n", encoding="utf-8")
     git_out("commit", "-am", "B")
 
     mozphab.main(["submit", "--yes", "--bug", "1", "--single"], is_development=True)
@@ -498,11 +499,11 @@ def test_submit_single_first(in_process, git_repo_path, init_sha, git_sha):
         # differential.revision.edit
         dict(object=dict(id="123")),
     )
-    (git_repo_path / "X").write_text("a\n")
+    (git_repo_path / "X").write_text("a\n", encoding="utf-8")
     git_out("add", "X")
     git_out("commit", "-am", "A")
     sha = git_sha()
-    (git_repo_path / "X").write_text("b\n")
+    (git_repo_path / "X").write_text("b\n", encoding="utf-8")
     git_out("commit", "-am", "B")
 
     mozphab.main(
@@ -551,7 +552,7 @@ def test_submit_update_no_message(in_process, git_repo_path, init_sha):
         dict(object=dict(id="123")),
     )
     testfile = git_repo_path / "X"
-    testfile.write_text(u"ą")
+    testfile.write_text(u"ą", encoding="utf-8")
     git_out("add", ".")
     msgfile = git_repo_path / "msg"
     msgfile.write_text(
@@ -559,7 +560,8 @@ def test_submit_update_no_message(in_process, git_repo_path, init_sha):
 Bug 1 - Ą
 
 Differential Revision: http://example.test/D123
-"""
+""",
+        encoding="utf-8",
     )
     git_out("commit", "--file", "msg")
 
@@ -583,7 +585,7 @@ def test_submit_different_author_arc(in_process, git_repo_path, init_sha):
         [{"userName": "alice", "phid": "PHID-USER-1"}],
     )
     testfile = git_repo_path / "X"
-    testfile.write_text("a")
+    testfile.write_text("a", encoding="utf-8")
     git_out("add", ".")
     git_out(
         "commit",
@@ -594,7 +596,7 @@ def test_submit_different_author_arc(in_process, git_repo_path, init_sha):
         "--message",
         "A r?alice",
     )
-    testfile.write_text("b")
+    testfile.write_text("b", encoding="utf-8")
     git_out(
         "commit",
         "--date",
@@ -626,7 +628,7 @@ def test_submit_utf8_author_arc(in_process, git_repo_path, init_sha):
         [{"userName": "alice", "phid": "PHID-USER-1"}],
     )
     testfile = git_repo_path / "X"
-    testfile.write_text("a")
+    testfile.write_text("a", encoding="utf-8")
     git_out("add", ".")
     git_out(
         "commit",
@@ -669,7 +671,7 @@ def test_submit_update_arc(in_process, git_repo_path, init_sha):
         dict(phid="PHID-USER-1"),
     )
     testfile = git_repo_path / "X"
-    testfile.write_text("a")
+    testfile.write_text("a", encoding="utf-8")
     git_out("add", ".")
 
     # Write out our commit message as if the program had already run and appended
@@ -729,7 +731,7 @@ def test_submit_update_bug_id_arc(in_process, git_repo_path, init_sha):
         {"data": {}},
     )
     testfile = git_repo_path / "X"
-    testfile.write_text("a")
+    testfile.write_text("a", encoding="utf-8")
     git_out("add", ".")
 
     # Write out our commit message as if the program had already run and appended
@@ -786,7 +788,7 @@ def test_submit_update_revision_not_found(in_process, git_repo_path, init_sha):
         dict(data=[]),
     )
     testfile = git_repo_path / "X"
-    testfile.write_text(u"ą")
+    testfile.write_text(u"ą", encoding="utf-8")
     git_out("add", ".")
     msgfile = git_repo_path / "msg"
     msgfile.write_text(
@@ -794,16 +796,18 @@ def test_submit_update_revision_not_found(in_process, git_repo_path, init_sha):
 Bug 1 - Ą
 
 Differential Revision: http://example.test/D123
-"""
+""",
+        encoding="utf-8",
     )
     git_out("commit", "--file", "msg")
-    testfile.write_text(u"missing repo")
+    testfile.write_text(u"missing repo", encoding="utf-8")
     msgfile.write_text(
         u"""\
 Bug 1 - missing revision
 
 Differential Revision: http://example.test/D124
-"""
+""",
+        encoding="utf-8",
     )
     git_out("commit", "--all", "--file", "./msg")
 

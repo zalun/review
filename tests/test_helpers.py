@@ -11,6 +11,7 @@ from mozphab import (
     arcanist,
     conduit,
     detect_repository,
+    environment,
     exceptions,
     helpers,
     mozphab,
@@ -515,11 +516,13 @@ def test_parse_config_with_filter():
 
 
 @mock.patch("os.path.expanduser")
+@mock.patch("os.path.join")
 @mock.patch("os.path.isfile")
 @mock.patch("os.stat")
 @mock.patch("os.chmod")
-def test_get_arcrc_path(m_chmod, m_stat, m_isfile, m_expand):
-    arcrc = conduit.get_arcrc_path
+@mock.patch("os.getenv")
+def test_get_arcrc_path(m_getenv, m_chmod, m_stat, m_isfile, m_join, m_expand):
+    arcrc = helpers.get_arcrc_path
 
     m_expand.return_value = "arcrc file"
     m_isfile.return_value = False
@@ -539,10 +542,17 @@ def test_get_arcrc_path(m_chmod, m_stat, m_isfile, m_expand):
     m_chmod.assert_not_called()
 
     m_chmod.reset_mock()
+    m_getenv.reset_mock()
+    m_join.reset_mock()
+    m_getenv.side_effect = ("/app_data",)
     stat.st_mode = 0o100640
     simplecache.cache.reset()
     arcrc()
-    m_chmod.assert_called_once_with("arcrc file", 0o600)
+    if environment.IS_WINDOWS:
+        m_getenv.assert_called_once_with("APPDATA", "")
+        m_join.assert_called_once_with("/app_data", ".arcrc")
+    else:
+        m_chmod.assert_called_once_with("arcrc file", 0o600)
 
 
 def test_short_node():
